@@ -82,7 +82,7 @@ with st.expander("➕ Adicionar Nova Despesa"):
             try:
                 supabase.table("despesas").insert(nova_despesa).execute()
                 st.success("💾 Despesa adicionada com sucesso!")
-                st.experimental_rerun()
+                st.rerun()
             except Exception as e:
                 st.error(f"❌ Erro ao adicionar despesa: {e}")
 
