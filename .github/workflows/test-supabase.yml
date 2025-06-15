@@ -1,0 +1,28 @@
+name: Teste Conexão Supabase
+
+on:
+  workflow_dispatch:  # Isso permite rodar manualmente
+
+jobs:
+  test-supabase:
+    runs-on: ubuntu-latest  # Usa uma máquina virtual na nuvem
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v3
+
+      - name: Instalar Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'  # Pode ser 3.10 ou 3.11
+
+      - name: Instalar dependências
+        run: |
+          pip install supabase pandas
+
+      - name: Testar conexão com Supabase
+        run: |
+          python teste_supabase.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
