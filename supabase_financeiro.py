@@ -14,7 +14,7 @@ st.set_page_config(page_title="Controle Financeiro", layout="wide")
 # ======================================
 # 🔗 CONEXÃO COM SUPABASE
 url = "https://zhuqsxfmzubsxgbtfemq.supabase.co"
-key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpodXFzeGZtenVic3hnYnRmZW1xIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDk5NTc4ODEsImV4cCI6MjA2NTUzMzg4MX0.6iUd7jGQRxN1ZLAvQv57b3QJpLkd4Mdzs43h9uDSfwc"  # 🔥 Colocar no st.secrets futuramente
+key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpodXFzeGZtenVic3hnYnRmZW1xIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDk5NTc4ODEsImV4cCI6MjA2NTUzMzg4MX0.6iUd7jGQRxN1ZLAvQv57b3QJpLkd4Mdzs43h9uDSfwc"  # 🔥 Recomendo usar st.secrets
 supabase: Client = create_client(url, key)
 
 
@@ -88,7 +88,7 @@ with st.expander("➕ Adicionar Nova Despesa"):
                 try:
                     supabase.table("despesas").insert(nova_despesa).execute()
                     st.success("💾 Despesa adicionada com sucesso!")
-                    st.rerun()
+                    st.rerun()  # 🔥 Atualiza na hora
                 except Exception as e:
                     st.error(f"❌ Erro ao adicionar despesa: {e}")
 
@@ -136,7 +136,8 @@ df_filtrado = df[filtro]
 # ======================================
 # 📄 PÁGINAS
 pagina = st.sidebar.radio("📄 Navegação", [
-    "📊 Visão Geral", "👥 Comparativo por Responsável", "💡 Visão Inteligente por Mês", "💳 Renda Comprometida"
+    "📊 Visão Geral", "👥 Comparativo por Responsável", "💡 Visão Inteligente por Mês", 
+    "💳 Renda Comprometida", "🗑️ Deletar Registros"
 ])
 
 
@@ -170,7 +171,7 @@ if pagina == "📊 Visão Geral":
 
 
 # ======================================
-# 👥 COMPARATIVO POR RESPONSÁVEL (AGORA COM PARCELAS!)
+# 👥 COMPARATIVO POR RESPONSÁVEL
 elif pagina == "👥 Comparativo por Responsável":
     st.title("👥 Comparativo por Responsável")
 
@@ -284,3 +285,53 @@ elif pagina == "💳 Renda Comprometida":
                 resumo['% da Renda'] = resumo['% da Renda'].apply(lambda x: f"{x:.1%}")
 
                 col.dataframe(resumo.set_index('categoria'))
+
+
+# ======================================
+# 🗑️ DELETAR REGISTROS
+elif pagina == "🗑️ Deletar Registros":
+    st.title("🗑️ Deletar Registros de Despesas")
+
+    if df.empty:
+        st.warning("Nenhuma despesa cadastrada.")
+    else:
+        st.info("Selecione os registros que deseja deletar. Os registros mais recentes aparecem primeiro.")
+
+        df_deletar = df.sort_values(by="data_despesa", ascending=False).reset_index(drop=True)
+        df_deletar['Data'] = df_deletar['data_despesa'].dt.strftime('%d/%m/%Y')
+
+        df_mostrar = df_deletar[['id', 'Data', 'categoria', 'descricao', 'valor', 'forma_pagamento', 'parcelas', 'responsavel']]
+
+        df_mostrar = df_mostrar.rename(columns={
+            'id': 'ID',
+            'Data': 'Data',
+            'categoria': 'Categoria',
+            'descricao': 'Descrição',
+            'valor': 'Valor (R$)',
+            'forma_pagamento': 'Forma',
+            'parcelas': 'Parcelas',
+            'responsavel': 'Responsável'
+        })
+
+        st.dataframe(df_mostrar, use_container_width=True)
+
+        ids_para_deletar = st.multiselect(
+            "Selecione os IDs que deseja deletar:",
+            df_mostrar['ID'].tolist()
+        )
+
+        if ids_para_deletar:
+            st.warning(f"🚨 Você está prestes a deletar {len(ids_para_deletar)} registro(s). Esta ação não pode ser desfeita.")
+
+            if st.button("🚨 Confirmar Deleção"):
+                try:
+                    for id_deletar in ids_para_deletar:
+                        supabase.table('despesas').delete().eq('id', id_deletar).execute()
+
+                    st.success(f"✅ {len(ids_para_deletar)} registro(s) deletado(s) com sucesso!")
+                    st.rerun()
+
+                except Exception as e:
+                    st.error(f"❌ Erro ao deletar: {e}")
+        else:
+            st.info("Selecione um ou mais IDs na lista acima para habilitar a exclusão.")
