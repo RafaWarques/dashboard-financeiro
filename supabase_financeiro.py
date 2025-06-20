@@ -14,7 +14,7 @@ st.set_page_config(page_title="Controle Financeiro", layout="wide")
 # ======================================
 # 🔗 CONEXÃO COM SUPABASE
 url = "https://zhuqsxfmzubsxgbtfemq.supabase.co"
-key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpodXFzeGZtenVic3hnYnRmZW1xIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDk5NTc4ODEsImV4cCI6MjA2NTUzMzg4MX0.6iUd7jGQRxN1ZLAvQv57b3QJpLkd4Mdzs43h9uDSfwc"  # 🔥 MELHORIA: colocar no st.secrets futuramente
+key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpodXFzeGZtenVic3hnYnRmZW1xIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDk5NTc4ODEsImV4cCI6MjA2NTUzMzg4MX0.6iUd7jGQRxN1ZLAvQv57b3QJpLkd4Mdzs43h9uDSfwc"  # 🔥 Colocar no st.secrets futuramente
 supabase: Client = create_client(url, key)
 
 
@@ -170,26 +170,37 @@ if pagina == "📊 Visão Geral":
 
 
 # ======================================
-# 👥 COMPARATIVO POR RESPONSÁVEL
+# 👥 COMPARATIVO POR RESPONSÁVEL (AGORA COM PARCELAS!)
 elif pagina == "👥 Comparativo por Responsável":
     st.title("👥 Comparativo por Responsável")
 
-    if df_filtrado.empty:
-        st.warning("Nenhuma despesa encontrada com os filtros selecionados.")
+    if df_parcelado.empty:
+        st.warning("Nenhuma despesa cadastrada.")
     else:
-        df_comp = df_filtrado.copy()
-        df_comp['Ano-Mês'] = df_comp['data_despesa'].apply(calcular_mes_fatura)
+        meses_fatura = df_parcelado['Ano-Mês Fatura'].drop_duplicates().sort_values(ascending=False)
+        mes_ref = st.selectbox("Selecione o Mês da Fatura", meses_fatura)
 
-        df_group = df_comp.groupby(['categoria', 'responsavel'])['valor'].sum().reset_index()
-        df_pivot = df_group.pivot(index='categoria', columns='responsavel', values='valor').fillna(0)
+        df_comp = df_parcelado[
+            (df_parcelado['Ano-Mês Fatura'] == mes_ref) &
+            (df_parcelado['responsavel'].isin(responsavel_filtro)) &
+            (df_parcelado['categoria'].isin(categoria_filtro)) &
+            (df_parcelado['Data Parcela'] >= pd.to_datetime(data_ini)) &
+            (df_parcelado['Data Parcela'] <= pd.to_datetime(data_fim))
+        ]
 
-        st.dataframe(df_pivot.style.format("R$ {:,.2f}"), use_container_width=True)
+        if df_comp.empty:
+            st.warning("Nenhuma despesa encontrada para os filtros selecionados.")
+        else:
+            df_group = df_comp.groupby(['categoria', 'responsavel'])['Valor Parcela'].sum().reset_index()
+            df_pivot = df_group.pivot(index='categoria', columns='responsavel', values='Valor Parcela').fillna(0)
 
-        fig = px.bar(
-            df_group, x='categoria', y='valor', color='responsavel',
-            barmode='group', title="Gastos por Categoria e Responsável"
-        )
-        st.plotly_chart(fig, use_container_width=True)
+            st.dataframe(df_pivot.style.format("R$ {:,.2f}"), use_container_width=True)
+
+            fig = px.bar(
+                df_group, x='categoria', y='Valor Parcela', color='responsavel',
+                barmode='group', title="Gastos por Categoria e Responsável"
+            )
+            st.plotly_chart(fig, use_container_width=True)
 
 
 # ======================================
@@ -273,4 +284,3 @@ elif pagina == "💳 Renda Comprometida":
                 resumo['% da Renda'] = resumo['% da Renda'].apply(lambda x: f"{x:.1%}")
 
                 col.dataframe(resumo.set_index('categoria'))
-
