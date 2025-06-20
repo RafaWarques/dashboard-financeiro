@@ -14,25 +14,25 @@ st.set_page_config(page_title="Controle Financeiro", layout="wide")
 # ======================================
 # 🔗 CONEXÃO COM SUPABASE
 url = "https://zhuqsxfmzubsxgbtfemq.supabase.co"
-key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpodXFzeGZtenVic3hnYnRmZW1xIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDk5NTc4ODEsImV4cCI6MjA2NTUzMzg4MX0.6iUd7jGQRxN1ZLAvQv57b3QJpLkd4Mdzs43h9uDSfwc"  # 🔥 Recomendo usar st.secrets
+key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpodXFzeGZtenVic3hnYnRmZW1xIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDk5NTc4ODEsImV4cCI6MjA2NTUzMzg4MX0.6iUd7jGQRxN1ZLAvQv57b3QJpLkd4Mdzs43h9uDSfwc"
 supabase: Client = create_client(url, key)
 
 
 # ======================================
 # 📥 CARREGAMENTO DOS DADOS
-@st.cache_data
 def carregar_dados():
-    res = supabase.table("despesas").select("*").execute()
-    df = pd.DataFrame(res.data)
-    if df.empty:
-        return df
-    df['data_despesa'] = pd.to_datetime(df['data_despesa'])
-    df['Semana'] = df['semana']
-    df['Mês'] = df['data_despesa'].dt.strftime('%B')
-    df['Ano'] = df['data_despesa'].dt.year
-    df['Dia'] = df['data_despesa'].dt.day
-    df['Parcelas'] = df['parcelas'].fillna(1).astype(int)
-    return df
+    if 'dados' not in st.session_state:
+        res = supabase.table("despesas").select("*").execute()
+        df = pd.DataFrame(res.data)
+        if not df.empty:
+            df['data_despesa'] = pd.to_datetime(df['data_despesa'])
+            df['Semana'] = df['semana']
+            df['Mês'] = df['data_despesa'].dt.strftime('%B')
+            df['Ano'] = df['data_despesa'].dt.year
+            df['Dia'] = df['data_despesa'].dt.day
+            df['Parcelas'] = df['parcelas'].fillna(1).astype(int)
+        st.session_state['dados'] = df
+    return st.session_state['dados']
 
 
 df = carregar_dados()
@@ -60,7 +60,7 @@ with st.expander("➕ Adicionar Nova Despesa"):
 
         col4, col5, col6 = st.columns(3)
         valor = col4.number_input("Valor (R$)", min_value=0.01, step=0.01, format="%.2f")
-        forma_pagamento = col5.selectbox("Forma de Pagamento", ["VR", "Cartão de Crédito", "Débito", "PIX", "Dinheiro"])
+        forma_pagamento = col5.selectbox("Forma de Pagamento", ["VR", "Cartão de Crédito"])  # ✅ Corrigido
         parcelas = col6.number_input("Parcelas", min_value=1, step=1, value=1)
 
         col7, col8 = st.columns(2)
@@ -88,7 +88,8 @@ with st.expander("➕ Adicionar Nova Despesa"):
                 try:
                     supabase.table("despesas").insert(nova_despesa).execute()
                     st.success("💾 Despesa adicionada com sucesso!")
-                    st.rerun()  # 🔥 Atualiza na hora
+                    st.session_state.pop('dados', None)  # 🔥 Limpa cache local
+                    st.rerun()
                 except Exception as e:
                     st.error(f"❌ Erro ao adicionar despesa: {e}")
 
@@ -329,6 +330,7 @@ elif pagina == "🗑️ Deletar Registros":
                         supabase.table('despesas').delete().eq('id', id_deletar).execute()
 
                     st.success(f"✅ {len(ids_para_deletar)} registro(s) deletado(s) com sucesso!")
+                    st.session_state.pop('dados', None)  # 🔥 Limpa cache local
                     st.rerun()
 
                 except Exception as e:
