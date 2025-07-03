@@ -46,6 +46,28 @@ def calcular_mes_fatura(data):
         return (data + pd.DateOffset(months=1)).strftime('%Y-%m')
     return data.strftime('%Y-%m')
 
+# ======================================
+# 🔧 FUNÇÃO DE SCRAPING (PAO DE ACUCAR)
+def get_banana_price_paodeacucar():
+    try:
+        url = "https://www.paodeacucar.com/busca?term=banana"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        response = requests.get(url, headers=headers)
+        if response.status_code != 200:
+            return None
+        soup = BeautifulSoup(response.text, "html.parser")
+        for produto in soup.find_all("div", class_="product-card__title"):
+            nome = produto.get_text(strip=True).lower()
+            if "banana prata" in nome or "banana nanica" in nome:
+                preco_elemento = produto.find_parent().find("span", class_="price__sales")
+                if preco_elemento:
+                    preco = preco_elemento.get_text(strip=True).replace("R$", "").replace(",", ".")
+                    return float(preco)
+        return None
+    except:
+        return None
+
+
 
 # ======================================
 # ➕ FORMULÁRIO PARA NOVA DESPESA
@@ -354,26 +376,5 @@ elif pagina == "🍌 Preço da Banana":
 
     st.image("https://cdn.pixabay.com/photo/2018/01/15/07/51/banana-3088433_960_720.jpg", width=200)
 
-
-# ======================================
-# 🔧 FUNÇÃO DE SCRAPING (PAO DE ACUCAR)
-def get_banana_price_paodeacucar():
-    try:
-        url = "https://www.paodeacucar.com/busca?term=banana"
-        headers = {"User-Agent": "Mozilla/5.0"}
-        response = requests.get(url, headers=headers)
-        if response.status_code != 200:
-            return None
-        soup = BeautifulSoup(response.text, "html.parser")
-        for produto in soup.find_all("div", class_="product-card__title"):
-            nome = produto.get_text(strip=True).lower()
-            if "banana prata" in nome or "banana nanica" in nome:
-                preco_elemento = produto.find_parent().find("span", class_="price__sales")
-                if preco_elemento:
-                    preco = preco_elemento.get_text(strip=True).replace("R$", "").replace(",", ".")
-                    return float(preco)
-        return None
-    except:
-        return None
 
 
