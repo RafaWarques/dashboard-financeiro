@@ -139,7 +139,7 @@ df_filtrado = df[filtro]
 # 📄 PÁGINAS
 pagina = st.sidebar.radio("📄 Navegação", [
     "📊 Visão Geral", "👥 Comparativo por Responsável", "💡 Visão Inteligente por Mês", 
-    "💳 Renda Comprometida", "🗑️ Deletar Registros", "🍌 Preço de Produtos"
+    "💳 Renda Comprometida", "🗑️ Deletar Registros", "🍌 Preço da Banana"
 ])
 
 
@@ -340,6 +340,22 @@ elif pagina == "🗑️ Deletar Registros":
             st.info("Selecione um ou mais IDs na lista acima para habilitar a exclusão.")
 
 # ======================================
+# 🍌 PREÇO DA BANANA
+elif pagina == "🍌 Preço da Banana":
+    st.title("🍌 Preço da Banana (por kg)")
+
+    preco_pa = get_banana_price_paodeacucar()
+
+    if preco_pa:
+        st.metric("Pão de Açúcar", f"R$ {preco_pa:.2f}")
+        st.success(f"Preço médio atual (Pão de Açúcar): R$ {preco_pa:.2f}")
+    else:
+        st.error("❌ Não foi possível obter o preço do Pão de Açúcar.")
+
+    st.image("https://cdn.pixabay.com/photo/2018/01/15/07/51/banana-3088433_960_720.jpg", width=200)
+
+
+# ======================================
 # 🔧 FUNÇÃO DE SCRAPING (PAO DE ACUCAR)
 def get_banana_price_paodeacucar():
     try:
@@ -360,18 +376,4 @@ def get_banana_price_paodeacucar():
     except:
         return None
 
-# ======================================
-# 📄 NOVA PÁGINA: PREÇO DA BANANA
-elif pagina == "🍌 Preço da Banana":
-    st.title("🍌 Preço da Banana (por kg)")
-
-    preco_pa = get_banana_price_paodeacucar()
-
-    if preco_pa:
-        st.metric("Pão de Açúcar", f"R$ {preco_pa:.2f}")
-        st.success(f"Preço médio atual (Pão de Açúcar): R$ {preco_pa:.2f}")
-    else:
-        st.error("❌ Não foi possível obter o preço do Pão de Açúcar.")
-
-    st.image("https://cdn.pixabay.com/photo/2018/01/15/07/51/banana-3088433_960_720.jpg", width=200)
 
