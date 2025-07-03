@@ -4,3 +4,5 @@ plotly
 supabase
 httpx
 python-dotenv
+requests
+beautifulsoup4
