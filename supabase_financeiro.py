@@ -8,6 +8,7 @@ from supabase import create_client, Client
 import warnings
 import requests  # ✅ NOVO
 from bs4 import BeautifulSoup  # ✅ NOVO
+import unicodedata
 warnings.filterwarnings('ignore')
 
 st.set_page_config(page_title="Controle Financeiro", layout="wide")
@@ -59,14 +60,14 @@ def get_banana_price_paodeacucar():
         produtos = response.json()
         for item in produtos:
             nome = item.get("productName", "").lower()
-            if "banana nanica" in nome:
+            nome = unicodedata.normalize("NFKD", nome).encode("ascii", "ignore").decode("utf-8")
+
+            if "banana" in nome and "nanica" in nome:
                 preco = item["items"][0]["sellers"][0]["commertialOffer"]["Price"]
                 return float(preco)
         return None
     except Exception as e:
         return None
-
-
 
 # ======================================
 # ➕ FORMULÁRIO PARA NOVA DESPESA
