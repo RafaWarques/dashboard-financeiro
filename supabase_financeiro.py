@@ -52,7 +52,12 @@ def calcular_mes_fatura(data):
 def get_banana_price_paodeacucar():
     try:
         url = "https://www.paodeacucar.com/api/catalog_system/pub/products/search/banana"
-        headers = {"User-Agent": "Mozilla/5.0"}
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
+            "Accept": "application/json",
+            "Accept-Language": "pt-BR,pt;q=0.9",
+            "Referer": "https://www.paodeacucar.com/",
+        }
         response = requests.get(url, headers=headers, timeout=10)
         if response.status_code != 200:
             return None
@@ -60,16 +65,16 @@ def get_banana_price_paodeacucar():
         produtos = response.json()
         for item in produtos:
             nome = item.get("productName", "").lower()
-            nome = unicodedata.normalize("NFKD", nome).encode("ascii", "ignore").decode("utf-8")
+            link = item.get("linkText", "").lower()
 
-            link = item.get("linkText", "")
             if "banana-nanica" in link or ("banana" in nome and "nanica" in nome):
                 preco = item["items"][0]["sellers"][0]["commertialOffer"]["Price"]
                 return float(preco) if preco > 0 else None
 
         return None
-    except Exception as e:
+    except Exception:
         return None
+
 
 # ======================================
 # ➕ FORMULÁRIO PARA NOVA DESPESA
