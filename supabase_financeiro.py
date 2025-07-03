@@ -50,21 +50,20 @@ def calcular_mes_fatura(data):
 # 🔧 FUNÇÃO DE SCRAPING (PAO DE ACUCAR)
 def get_banana_price_paodeacucar():
     try:
-        url = "https://www.paodeacucar.com/busca?term=banana"
+        url = "https://www.paodeacucar.com/api/catalog_system/pub/products/search/banana"
         headers = {"User-Agent": "Mozilla/5.0"}
         response = requests.get(url, headers=headers)
         if response.status_code != 200:
             return None
-        soup = BeautifulSoup(response.text, "html.parser")
-        for produto in soup.find_all("div", class_="product-card__title"):
-            nome = produto.get_text(strip=True).lower()
-            if "banana prata" in nome or "banana nanica" in nome:
-                preco_elemento = produto.find_parent().find("span", class_="price__sales")
-                if preco_elemento:
-                    preco = preco_elemento.get_text(strip=True).replace("R$", "").replace(",", ".")
-                    return float(preco)
+
+        produtos = response.json()
+        for item in produtos:
+            nome = item.get("productName", "").lower()
+            if "banana nanica" in nome:
+                preco = item["items"][0]["sellers"][0]["commertialOffer"]["Price"]
+                return float(preco)
         return None
-    except:
+    except Exception as e:
         return None
 
 
