@@ -342,54 +342,44 @@ elif pagina == "🗑️ Deletar Registros":
 # ======================================
 # 🛒 SIMULAÇÃO DE COMPRA
 elif pagina == "🛒 Simulação de Compra":
-    st.title("🛒 Simulação de Compra")
+    st.title("🛒 Simulação de Compra por Produto")
 
-    # Tabela embutida com preços atualizados
-    precos = pd.DataFrame([
-        {"Produto": "Banana", "Mercado": "Pão de Açúcar", "Preco": 7.98},
-        {"Produto": "Banana", "Mercado": "Carrefour", "Preco": 5.89},
-        {"Produto": "Banana", "Mercado": "Extra", "Preco": 4.79},
-        {"Produto": "Iogurte Grego", "Mercado": "Pão de Açúcar", "Preco": 3.69},
-        {"Produto": "Iogurte Grego", "Mercado": "Carrefour", "Preco": 2.99},
-        {"Produto": "Iogurte Grego", "Mercado": "Extra", "Preco": 4.09},
-        {"Produto": "Leite em Pó Itambé", "Mercado": "Pão de Açúcar", "Preco": 18.29},
-        {"Produto": "Leite em Pó Itambé", "Mercado": "Carrefour", "Preco": 15.99},
-        {"Produto": "Leite em Pó Itambé", "Mercado": "Extra", "Preco": 17.99},
-        {"Produto": "Arroz Camil 1kg", "Mercado": "Pão de Açúcar", "Preco": 6.49},
-        {"Produto": "Arroz Camil 1kg", "Mercado": "Carrefour", "Preco": 4.59},
-        {"Produto": "Arroz Camil 1kg", "Mercado": "Extra", "Preco": 5.99},
-        {"Produto": "Papel Higiênico 12 rolos", "Mercado": "Pão de Açúcar", "Preco": 24.99},
-        {"Produto": "Papel Higiênico 12 rolos", "Mercado": "Carrefour", "Preco": 30.59},
-        {"Produto": "Papel Higiênico 12 rolos", "Mercado": "Extra", "Preco": 29.99},
-        {"Produto": "Azeite", "Mercado": "Pão de Açúcar", "Preco": 34.99},
-        {"Produto": "Azeite", "Mercado": "Carrefour", "Preco": 34.79},
-        {"Produto": "Azeite", "Mercado": "Extra", "Preco": 36.99},
-    ])
+    # Tabela fixa de preços
+    dados_precos = [
+        {"Produto": "Banana", "Unidade": "kg", "Carrefour": 5.89, "Extra": 4.79, "Pão de Açúcar": 7.98},
+        {"Produto": "Iogurte Grego", "Unidade": "unidade", "Carrefour": 2.99, "Extra": 4.09, "Pão de Açúcar": 3.69},
+        {"Produto": "Leite em Pó Itambé", "Unidade": "unidade", "Carrefour": 15.99, "Extra": 17.99, "Pão de Açúcar": 18.29},
+        {"Produto": "Arroz Camil 1kg", "Unidade": "unidade", "Carrefour": 4.59, "Extra": 5.99, "Pão de Açúcar": 6.49},
+        {"Produto": "Papel Higiênico 12 rolos", "Unidade": "unidade", "Carrefour": 30.59, "Extra": 29.99, "Pão de Açúcar": 24.99},
+        {"Produto": "Azeite", "Unidade": "unidade", "Carrefour": 34.79, "Extra": 36.99, "Pão de Açúcar": 34.99},
+    ]
+    df_precos = pd.DataFrame(dados_precos)
 
-    st.markdown("🛒 Escolha um produto e um mercado para simular sua compra.")
-    produto_sel = st.selectbox("Produto", precos["Produto"].unique())
-    mercado_sel = st.selectbox("Mercado", precos["Mercado"].unique())
+    # Produto selecionado
+    produto_selecionado = st.selectbox("Selecione o produto:", df_precos["Produto"].unique())
 
-    preco_unitario = precos.query(
-        "Produto == @produto_sel and Mercado == @mercado_sel"
-    )["Preco"].values[0]
+    # Info do produto
+    produto_info = df_precos[df_precos["Produto"] == produto_selecionado].iloc[0]
+    unidade = produto_info["Unidade"]
+    qtde = st.number_input(f"Quantidade desejada ({unidade}):", 
+                           min_value=0.0, step=0.5 if unidade == "kg" else 1.0, 
+                           value=1.0, format="%.2f")
 
-    # Entrada de quantidade (kg para banana, unidades para o resto)
-    if produto_sel == "Banana":
-        unidade = "kg"
-        quantidade = st.number_input("Quantidade (kg)", min_value=0.0, step=0.1, value=1.0)
-    else:
-        unidade = "unid."
-        quantidade = st.number_input("Quantidade (unidades)", min_value=1, step=1, value=1)
+    # Mostrar os preços nos três mercados
+    st.subheader(f"💵 Preços para **{produto_selecionado}**")
 
-    total = preco_unitario * quantidade
+    col1, col2, col3 = st.columns(3)
+    for col, mercado in zip([col1, col2, col3], ["Carrefour", "Extra", "Pão de Açúcar"]):
+        preco_unit = produto_info[mercado]
+        total = preco_unit * qtde
+        col.markdown(f"### 🛍️ {mercado}")
+        col.metric("Preço unitário", f"R$ {preco_unit:.2f}")
+        col.metric("Total estimado", f"R$ {total:.2f}")
 
-    st.markdown(f"💰 Preço unitário: **R$ {preco_unitario:.2f}** por {unidade}")
-    st.success(f"🧾 Total estimado: R$ {total:.2f}")
+    # Mostrar tabela (opcional)
+    with st.expander("📋 Ver tabela completa de preços"):
+        st.dataframe(df_precos.set_index("Produto"))
 
-    with st.expander("📊 Ver todos os preços disponíveis"):
-        tabela_display = precos.pivot(index="Produto", columns="Mercado", values="Preco")
-        st.dataframe(tabela_display.style.format("R$ {:.2f}"), use_container_width=True)
 
 
 
