@@ -342,26 +342,55 @@ elif pagina == "🗑️ Deletar Registros":
 # ======================================
 # 🛒 SIMULAÇÃO DE COMPRA
 elif pagina == "🛒 Simulação de Compra":
-    st.title("🛒 Simulação de Compra: Banana")
+    st.title("🛒 Simulação de Compra")
 
-    try:
-        response = requests.get("http://localhost:8000/preco-banana", timeout=5)
-        response.raise_for_status()
-        data = response.json()
-        preco_banana = data.get("preco", None)
-    except Exception as e:
-        st.error(f"Erro ao consultar a API: {e}")
-        preco_banana = None
+    # Tabela embutida com preços atualizados
+    precos = pd.DataFrame([
+        {"Produto": "Banana", "Mercado": "Pão de Açúcar", "Preco": 7.98},
+        {"Produto": "Banana", "Mercado": "Carrefour", "Preco": 5.89},
+        {"Produto": "Banana", "Mercado": "Extra", "Preco": 4.79},
+        {"Produto": "Iogurte Grego", "Mercado": "Pão de Açúcar", "Preco": 3.69},
+        {"Produto": "Iogurte Grego", "Mercado": "Carrefour", "Preco": 2.99},
+        {"Produto": "Iogurte Grego", "Mercado": "Extra", "Preco": 4.09},
+        {"Produto": "Leite em Pó Itambé", "Mercado": "Pão de Açúcar", "Preco": 18.29},
+        {"Produto": "Leite em Pó Itambé", "Mercado": "Carrefour", "Preco": 15.99},
+        {"Produto": "Leite em Pó Itambé", "Mercado": "Extra", "Preco": 17.99},
+        {"Produto": "Arroz Camil 1kg", "Mercado": "Pão de Açúcar", "Preco": 6.49},
+        {"Produto": "Arroz Camil 1kg", "Mercado": "Carrefour", "Preco": 4.59},
+        {"Produto": "Arroz Camil 1kg", "Mercado": "Extra", "Preco": 5.99},
+        {"Produto": "Papel Higiênico 12 rolos", "Mercado": "Pão de Açúcar", "Preco": 24.99},
+        {"Produto": "Papel Higiênico 12 rolos", "Mercado": "Carrefour", "Preco": 30.59},
+        {"Produto": "Papel Higiênico 12 rolos", "Mercado": "Extra", "Preco": 29.99},
+        {"Produto": "Azeite", "Mercado": "Pão de Açúcar", "Preco": 34.99},
+        {"Produto": "Azeite", "Mercado": "Carrefour", "Preco": 34.79},
+        {"Produto": "Azeite", "Mercado": "Extra", "Preco": 36.99},
+    ])
 
-    st.image("https://cdn.pixabay.com/photo/2018/04/29/11/26/bananas-3359755_1280.jpg", width=200)
+    st.markdown("🛒 Escolha um produto e um mercado para simular sua compra.")
+    produto_sel = st.selectbox("Produto", precos["Produto"].unique())
+    mercado_sel = st.selectbox("Mercado", precos["Mercado"].unique())
 
-    if preco_banana is not None:
-        st.write(f"💰 Preço atual (Pão de Açúcar via API): **R$ {preco_banana:.2f}** por kg")
-        kg = st.number_input("Quantos kg deseja comprar?", 0.0, 20.0, 1.0, step=0.5)
-        total = kg * preco_banana
-        st.success(f"Total estimado: R$ {total:.2f}")
+    preco_unitario = precos.query(
+        "Produto == @produto_sel and Mercado == @mercado_sel"
+    )["Preco"].values[0]
+
+    # Entrada de quantidade (kg para banana, unidades para o resto)
+    if produto_sel == "Banana":
+        unidade = "kg"
+        quantidade = st.number_input("Quantidade (kg)", min_value=0.0, step=0.1, value=1.0)
     else:
-        st.warning("Preço indisponível no momento. Verifique se a API está online.")
+        unidade = "unid."
+        quantidade = st.number_input("Quantidade (unidades)", min_value=1, step=1, value=1)
+
+    total = preco_unitario * quantidade
+
+    st.markdown(f"💰 Preço unitário: **R$ {preco_unitario:.2f}** por {unidade}")
+    st.success(f"🧾 Total estimado: R$ {total:.2f}")
+
+    with st.expander("📊 Ver todos os preços disponíveis"):
+        tabela_display = precos.pivot(index="Produto", columns="Mercado", values="Preco")
+        st.dataframe(tabela_display.style.format("R$ {:.2f}"), use_container_width=True)
+
 
 
 
