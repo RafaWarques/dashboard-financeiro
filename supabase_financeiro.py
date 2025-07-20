@@ -115,32 +115,15 @@ else:
 
 
 # ======================================
-# 🔥 FILTROS GLOBAIS 🔥
-st.sidebar.header("🔍 Filtros Globais")
-responsavel_filtro = st.sidebar.multiselect(
-    "Responsável", df['responsavel'].dropna().unique(), default=df['responsavel'].dropna().unique()
-)
-categoria_filtro = st.sidebar.multiselect(
-    "Categoria", df['categoria'].dropna().unique(), default=df['categoria'].dropna().unique()
-)
-data_ini = st.sidebar.date_input("Data Inicial", df['data_despesa'].min() if not df.empty else datetime.today())
-data_fim = st.sidebar.date_input("Data Final", df['data_despesa'].max() if not df.empty else datetime.today())
-
+# 🔥 FILTRO GLOBAL 🔥
+st.sidebar.header("🔍 Filtro Global")
 forma_pagamento_filtro = st.sidebar.multiselect(
-    "Forma de Pagamento", df['forma_pagamento'].dropna().unique(),
+    "Forma de Pagamento",
+    df['forma_pagamento'].dropna().unique(),
     default=df['forma_pagamento'].dropna().unique()
 )
 
-
-filtro = (
-    (df['responsavel'].isin(responsavel_filtro)) &
-    (df['categoria'].isin(categoria_filtro)) &
-    (df['forma_pagamento'].isin(forma_pagamento_filtro)) &
-    (df['data_despesa'] >= pd.to_datetime(data_ini)) &
-    (df['data_despesa'] <= pd.to_datetime(data_fim))
-)
-df_filtrado = df[filtro]
-
+df_filtrado = df[df['forma_pagamento'].isin(forma_pagamento_filtro)]
 
 # ======================================
 # 📄 PÁGINAS
