@@ -126,9 +126,16 @@ categoria_filtro = st.sidebar.multiselect(
 data_ini = st.sidebar.date_input("Data Inicial", df['data_despesa'].min() if not df.empty else datetime.today())
 data_fim = st.sidebar.date_input("Data Final", df['data_despesa'].max() if not df.empty else datetime.today())
 
+forma_pagamento_filtro = st.sidebar.multiselect(
+    "Forma de Pagamento", df['forma_pagamento'].dropna().unique(),
+    default=df['forma_pagamento'].dropna().unique()
+)
+
+
 filtro = (
     (df['responsavel'].isin(responsavel_filtro)) &
     (df['categoria'].isin(categoria_filtro)) &
+    (df['forma_pagamento'].isin(forma_pagamento_filtro)) &
     (df['data_despesa'] >= pd.to_datetime(data_ini)) &
     (df['data_despesa'] <= pd.to_datetime(data_fim))
 )
@@ -187,9 +194,11 @@ elif pagina == "👥 Comparativo por Responsável":
             (df_parcelado['Ano-Mês Fatura'] == mes_ref) &
             (df_parcelado['responsavel'].isin(responsavel_filtro)) &
             (df_parcelado['categoria'].isin(categoria_filtro)) &
+            (df_parcelado['forma_pagamento'].isin(forma_pagamento_filtro)) &  # ← isso basta
             (df_parcelado['Data Parcela'] >= pd.to_datetime(data_ini)) &
             (df_parcelado['Data Parcela'] <= pd.to_datetime(data_fim))
         ]
+
 
         if df_comp.empty:
             st.warning("Nenhuma despesa encontrada para os filtros selecionados.")
@@ -222,7 +231,13 @@ elif pagina == "💡 Visão Inteligente por Mês":
             default=df_parcelado['responsavel'].dropna().unique()
         )
 
-        df_final = df_parcelado[df_parcelado['responsavel'].isin(resp_viz)]
+        # 🔧 Filtro completo com forma de pagamento
+        df_final = df_parcelado[
+            (df_parcelado['responsavel'].isin(resp_viz)) &
+            (df_parcelado['forma_pagamento'].isin(forma_pagamento_filtro)) &
+            (df_parcelado['Data Parcela'] >= pd.to_datetime(data_ini)) &
+            (df_parcelado['Data Parcela'] <= pd.to_datetime(data_fim))
+        ]
         df_mes = df_final[df_final['Ano-Mês Fatura'] == mes_ref]
 
         if df_mes.empty:
@@ -244,8 +259,7 @@ elif pagina == "💡 Visão Inteligente por Mês":
             df_mes['Data Parcela'] = pd.to_datetime(df_mes['Data Parcela']).dt.strftime('%d/%m/%Y')
             df_mes['Valor Parcela'] = df_mes['Valor Parcela'].map('R$ {:,.2f}'.format)
             st.dataframe(df_mes.sort_values("Data Parcela"), use_container_width=True)
-
-
+            
 # ======================================
 # 💳 RENDA COMPROMETIDA
 elif pagina == "💳 Renda Comprometida":
@@ -261,7 +275,9 @@ elif pagina == "💳 Renda Comprometida":
 
         df_mes = df_parcelado[
             (df_parcelado['Ano-Mês Fatura'] == mes_ref) &
-            (df_parcelado['forma_pagamento'].str.lower().str.contains('cartão'))
+            (df_parcelado['forma_pagamento'].isin(forma_pagamento_filtro)) &
+            (df_parcelado['Data Parcela'] >= pd.to_datetime(data_ini)) &
+            (df_parcelado['Data Parcela'] <= pd.to_datetime(data_fim))
         ]
 
         col1, col2 = st.columns(2)
@@ -287,6 +303,7 @@ elif pagina == "💳 Renda Comprometida":
                 resumo['% da Renda'] = resumo['% da Renda'].apply(lambda x: f"{x:.1%}")
 
                 col.dataframe(resumo.set_index('categoria'))
+
 
 
 # ======================================
