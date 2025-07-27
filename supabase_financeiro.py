@@ -175,12 +175,9 @@ elif pagina == "👥 Comparativo por Responsável":
 
         df_comp = df_parcelado[
             (df_parcelado['Ano-Mês Fatura'] == mes_ref) &
-            (df_parcelado['responsavel'].isin(responsavel_filtro)) &
-            (df_parcelado['categoria'].isin(categoria_filtro)) &
-            (df_parcelado['forma_pagamento'].isin(forma_pagamento_filtro)) &  # ← isso basta
-            (df_parcelado['Data Parcela'] >= pd.to_datetime(data_ini)) &
-            (df_parcelado['Data Parcela'] <= pd.to_datetime(data_fim))
+            (df_parcelado['forma_pagamento'].isin(forma_pagamento_filtro))
         ]
+
 
 
         if df_comp.empty:
@@ -215,13 +212,12 @@ elif pagina == "💡 Visão Inteligente por Mês":
         )
 
         # 🔧 Filtro completo com forma de pagamento
-        df_final = df_parcelado[
+        df_mes = df_parcelado[
             (df_parcelado['responsavel'].isin(resp_viz)) &
             (df_parcelado['forma_pagamento'].isin(forma_pagamento_filtro)) &
-            (df_parcelado['Data Parcela'] >= pd.to_datetime(data_ini)) &
-            (df_parcelado['Data Parcela'] <= pd.to_datetime(data_fim))
+            (df_parcelado['Ano-Mês Fatura'] == mes_ref)
         ]
-        df_mes = df_final[df_final['Ano-Mês Fatura'] == mes_ref]
+
 
         if df_mes.empty:
             st.warning("Nenhum lançamento encontrado para o mês selecionado.")
@@ -258,10 +254,9 @@ elif pagina == "💳 Renda Comprometida":
 
         df_mes = df_parcelado[
             (df_parcelado['Ano-Mês Fatura'] == mes_ref) &
-            (df_parcelado['forma_pagamento'].isin(forma_pagamento_filtro)) &
-            (df_parcelado['Data Parcela'] >= pd.to_datetime(data_ini)) &
-            (df_parcelado['Data Parcela'] <= pd.to_datetime(data_fim))
+            (df_parcelado['forma_pagamento'].isin(forma_pagamento_filtro))
         ]
+
 
         col1, col2 = st.columns(2)
 
