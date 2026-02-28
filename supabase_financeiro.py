@@ -3,380 +3,313 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from datetime import datetime
+from datetime import datetime, date
 from supabase import create_client, Client
 import warnings
-import requests  # ✅ NOVO
-from bs4 import BeautifulSoup  # ✅ NOVO
-import unicodedata
-warnings.filterwarnings('ignore')
+warnings.filterwarnings("ignore")
 
 st.set_page_config(page_title="Controle Financeiro", layout="wide")
 
 # ======================================
 # 🔗 CONEXÃO COM SUPABASE
 url = "https://zhuqsxfmzubsxgbtfemq.supabase.co"
-key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpodXFzeGZtenVic3hnYnRmZW1xIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDk5NTc4ODEsImV4cCI6MjA2NTUzMzg4MX0.6iUd7jGQRxN1ZLAvQv57b3QJpLkd4Mdzs43h9uDSfwc"
+key = "SUA_ANON_KEY_AQUI"
 supabase: Client = create_client(url, key)
 
+# ======================================
+# 📌 SCHEMA ESPERADO (para não quebrar com base vazia)
+COLUNAS_ESPERADAS = [
+    "id", "data_despesa", "categoria", "descricao", "valor",
+    "forma_pagamento", "parcelas", "responsavel", "semana"
+]
+
+RESPONSAVEIS_FIXOS = ["Rafael", "Nathalia"]
+FORMAS_FIXAS = ["Cartão de Crédito", "VR"]  # VR = Ticket/VR
 
 # ======================================
 # 📥 CARREGAMENTO DOS DADOS
 def carregar_dados():
-    if 'dados' not in st.session_state:
+    if "dados" not in st.session_state:
         res = supabase.table("despesas").select("*").execute()
         df = pd.DataFrame(res.data)
-        if not df.empty:
-            df['data_despesa'] = pd.to_datetime(df['data_despesa'])
-            df['Semana'] = df['semana']
-            df['Mês'] = df['data_despesa'].dt.strftime('%B')
-            df['Ano'] = df['data_despesa'].dt.year
-            df['Dia'] = df['data_despesa'].dt.day
-            df['Parcelas'] = df['parcelas'].fillna(1).astype(int)
-        st.session_state['dados'] = df
-    return st.session_state['dados']
+
+        # ✅ garante colunas mesmo sem linhas
+        if df.empty:
+            df = pd.DataFrame(columns=COLUNAS_ESPERADAS)
+        else:
+            # ✅ garante que as colunas existam (caso venha faltando algo)
+            for c in COLUNAS_ESPERADAS:
+                if c not in df.columns:
+                    df[c] = None
+
+        # ✅ tipos e colunas auxiliares (só se tiver data preenchida)
+        if "data_despesa" in df.columns and not df.empty:
+            df["data_despesa"] = pd.to_datetime(df["data_despesa"], errors="coerce")
+            df["valor"] = pd.to_numeric(df["valor"], errors="coerce").fillna(0.0)
+            df["parcelas"] = pd.to_numeric(df["parcelas"], errors="coerce").fillna(1).astype(int)
+
+            # Períodos
+            iso = df["data_despesa"].dt.isocalendar()
+            df["Ano"] = df["data_despesa"].dt.year
+            df["MesRef"] = df["data_despesa"].dt.to_period("M").astype(str)   # YYYY-MM
+            df["SemanaRef"] = (df["data_despesa"].dt.year.astype(str) + "-W" +
+                               iso.week.astype(int).astype(str).str.zfill(2))
+
+        st.session_state["dados"] = df
+
+    return st.session_state["dados"]
 
 
 df = carregar_dados()
 
-
 # ======================================
 # 🔧 FUNÇÕES AUXILIARES
-def calcular_mes_fatura(data):
-    if data.day >= 26:
-        return (data + pd.DateOffset(months=1)).strftime('%Y-%m')
-    return data.strftime('%Y-%m')
+def calcular_mes_fatura(data_parcela: pd.Timestamp) -> str:
+    # Regra: se dia >= 26, vira fatura do mês seguinte
+    if pd.isna(data_parcela):
+        return None
+    if data_parcela.day >= 26:
+        return (data_parcela + pd.DateOffset(months=1)).strftime("%Y-%m")
+    return data_parcela.strftime("%Y-%m")
+
+def gerar_df_parcelado(df_base: pd.DataFrame) -> pd.DataFrame:
+    if df_base.empty:
+        return pd.DataFrame(columns=list(df_base.columns) + ["Numero Parcela", "Data Parcela", "AnoMesFatura", "Valor Parcela"])
+
+    # replica linhas conforme nº de parcelas
+    dfp = df_base.loc[df_base.index.repeat(df_base["parcelas"])].reset_index(drop=True)
+
+    # número da parcela dentro do grupo (mesma compra)
+    dfp["Numero Parcela"] = dfp.groupby(["data_despesa", "valor", "responsavel", "descricao", "categoria"]).cumcount()
+
+    # data de cada parcela (mes a mes)
+    dfp["Data Parcela"] = dfp.apply(
+        lambda r: r["data_despesa"] + pd.DateOffset(months=int(r["Numero Parcela"])) if pd.notna(r["data_despesa"]) else pd.NaT,
+        axis=1
+    )
+
+    dfp["AnoMesFatura"] = dfp["Data Parcela"].apply(calcular_mes_fatura)
+    dfp["Valor Parcela"] = dfp["valor"] / dfp["parcelas"]
+
+    # colunas de período da parcela (para gráficos)
+    dfp["ParcelaMesRef"] = pd.to_datetime(dfp["Data Parcela"], errors="coerce").dt.to_period("M").astype(str)
+
+    return dfp
+
+df_parcelado = gerar_df_parcelado(df)
 
 # ======================================
 # ➕ FORMULÁRIO PARA NOVA DESPESA
 with st.expander("➕ Adicionar Nova Despesa"):
     with st.form("form_despesa", clear_on_submit=True):
-        col1, col2, col3 = st.columns(3)
-        data = col1.date_input("Data da Despesa", datetime.today())
-        categoria = col2.selectbox(
-            "Categoria", df['categoria'].dropna().unique() if not df.empty else 
-            ["Alimentação", "Saúde", "Transporte", "Lazer", "Farmácia", "Roupas", "Higiene", "Entretenimento"]
-        )
-        descricao = col3.text_input("Descrição")
+        c1, c2, c3 = st.columns(3)
+        data_in = c1.date_input("Data da Despesa", datetime.today())
+        categoria_in = c2.text_input("Categoria", value="Alimentação")
+        descricao_in = c3.text_input("Descrição")
 
-        col4, col5, col6 = st.columns(3)
-        valor = col4.number_input("Valor (R$)", min_value=0.01, step=0.01, format="%.2f")
-        forma_pagamento = col5.selectbox("Forma de Pagamento", ["VR", "Cartão de Crédito"])  # ✅ Corrigido
-        parcelas = col6.number_input("Parcelas", min_value=1, step=1, value=1)
+        c4, c5, c6 = st.columns(3)
+        valor_in = c4.number_input("Valor (R$)", min_value=0.01, step=0.01, format="%.2f")
+        forma_in = c5.selectbox("Forma de Pagamento", FORMAS_FIXAS)
+        parcelas_in = c6.number_input("Parcelas", min_value=1, step=1, value=1)
 
-        col7, col8 = st.columns(2)
-        responsavel = col7.selectbox(
-            "Responsável", df['responsavel'].dropna().unique() if not df.empty else ["Rafael", "Nathalia", "Iris"]
-        )
-        semana = col8.number_input("Semana do Ano", min_value=1, max_value=53, value=data.isocalendar()[1])
+        c7, c8 = st.columns(2)
+        resp_in = c7.selectbox("Responsável", RESPONSAVEIS_FIXOS)
+        semana_in = c8.number_input("Semana do Ano", min_value=1, max_value=53, value=data_in.isocalendar()[1])
 
         submit = st.form_submit_button("Adicionar Despesa")
 
         if submit:
-            if descricao.strip() == "":
+            if not descricao_in.strip():
                 st.error("❌ Descrição não pode estar vazia.")
             else:
-                nova_despesa = {
-                    'data_despesa': data.strftime('%Y-%m-%d'),
-                    'categoria': categoria,
-                    'descricao': descricao,
-                    'valor': valor,
-                    'forma_pagamento': forma_pagamento,
-                    'parcelas': parcelas,
-                    'responsavel': responsavel,
-                    'semana': semana
+                nova = {
+                    "data_despesa": data_in.strftime("%Y-%m-%d"),
+                    "categoria": categoria_in.strip(),
+                    "descricao": descricao_in.strip(),
+                    "valor": float(valor_in),
+                    "forma_pagamento": forma_in,
+                    "parcelas": int(parcelas_in),
+                    "responsavel": resp_in,
+                    "semana": int(semana_in),
                 }
                 try:
-                    supabase.table("despesas").insert(nova_despesa).execute()
+                    supabase.table("despesas").insert(nova).execute()
                     st.success("💾 Despesa adicionada com sucesso!")
-                    st.session_state.pop('dados', None)  # 🔥 Limpa cache local
+                    st.session_state.pop("dados", None)
                     st.rerun()
                 except Exception as e:
                     st.error(f"❌ Erro ao adicionar despesa: {e}")
 
-
 # ======================================
-# 🧠 DATAFRAME PARCELADO
-if not df.empty:
-    df_parcelado = df.loc[df.index.repeat(df['Parcelas'])].reset_index(drop=True)
-    df_parcelado['Numero Parcela'] = df_parcelado.groupby(
-        ['data_despesa', 'valor', 'responsavel']
-    ).cumcount()
+# 🔥 FILTROS GLOBAIS (Responsável, Forma, Data: Semana/Mês/Ano)
+st.sidebar.header("🔍 Filtros Globais")
 
-    df_parcelado['Data Parcela'] = df_parcelado.apply(
-        lambda row: row['data_despesa'] + pd.DateOffset(months=row['Numero Parcela']),
-        axis=1
-    )
-
-    df_parcelado['Ano-Mês Fatura'] = df_parcelado['Data Parcela'].apply(calcular_mes_fatura)
-    df_parcelado['Valor Parcela'] = df_parcelado['valor'] / df_parcelado['Parcelas']
-else:
-    df_parcelado = pd.DataFrame()
-
-
-# ======================================
-# 🔥 FILTRO GLOBAL 🔥
-st.sidebar.header("🔍 Filtro Global")
-forma_pagamento_filtro = st.sidebar.multiselect(
-    "Forma de Pagamento",
-    df['forma_pagamento'].dropna().unique(),
-    default=df['forma_pagamento'].dropna().unique()
+f_resp = st.sidebar.multiselect(
+    "Responsável",
+    RESPONSAVEIS_FIXOS,
+    default=RESPONSAVEIS_FIXOS
 )
 
-df_filtrado = df[df['forma_pagamento'].isin(forma_pagamento_filtro)]
+f_forma = st.sidebar.multiselect(
+    "Forma de Pagamento",
+    FORMAS_FIXAS,
+    default=FORMAS_FIXAS
+)
+
+gran = st.sidebar.radio("Período", ["Semana", "Mês", "Ano"], horizontal=True)
+
+# opções do seletor do período (com fallback)
+if df.empty or "data_despesa" not in df.columns:
+    op_periodo = []
+else:
+    if gran == "Semana":
+        op_periodo = sorted(df["SemanaRef"].dropna().unique(), reverse=True)
+    elif gran == "Mês":
+        op_periodo = sorted(df["MesRef"].dropna().unique(), reverse=True)
+    else:
+        op_periodo = sorted(df["Ano"].dropna().unique(), reverse=True)
+
+periodo_sel = st.sidebar.selectbox("Selecione o período", op_periodo) if op_periodo else None
+
+# aplica filtros
+df_f = df.copy()
+if not df_f.empty:
+    df_f = df_f[df_f["responsavel"].isin(f_resp)]
+    df_f = df_f[df_f["forma_pagamento"].isin(f_forma)]
+
+    if periodo_sel is not None:
+        if gran == "Semana":
+            df_f = df_f[df_f["SemanaRef"] == periodo_sel]
+        elif gran == "Mês":
+            df_f = df_f[df_f["MesRef"] == periodo_sel]
+        else:
+            df_f = df_f[df_f["Ano"] == periodo_sel]
+
+# para parcelado (filtros compatíveis)
+dfp_f = df_parcelado.copy()
+if not dfp_f.empty:
+    dfp_f = dfp_f[dfp_f["responsavel"].isin(f_resp)]
+    dfp_f = dfp_f[dfp_f["forma_pagamento"].isin(f_forma)]
 
 # ======================================
 # 📄 PÁGINAS
-pagina = st.sidebar.radio("📄 Navegação", [
-    "📊 Visão Geral", "👥 Comparativo por Responsável", "💡 Visão Inteligente por Mês", 
-    "💳 Renda Comprometida", "🗑️ Deletar Registros", "🛒 Simulação de Compra"
-])
-
+pagina = st.sidebar.radio("📄 Páginas", ["1) Gasto Total", "2) Parcelamentos", "3) Previsão"])
 
 # ======================================
-# 📊 VISÃO GERAL
-if pagina == "📊 Visão Geral":
-    st.title("📊 Visão Geral")
+# 1) GASTO TOTAL
+if pagina == "1) Gasto Total":
+    st.title("1) Gasto Total")
 
-    if df_filtrado.empty:
-        st.warning("Nenhuma despesa encontrada com os filtros selecionados.")
+    if df_f.empty:
+        st.warning("Sem dados para os filtros selecionados.")
     else:
-        total = df_filtrado['valor'].sum()
-        media = df_filtrado['valor'].mean()
-        qtd = len(df_filtrado)
+        # a) gráfico em barras com gasto total
+        # (por responsável no período filtrado; simples e legível)
+        total_resp = df_f.groupby("responsavel", as_index=False)["valor"].sum()
+        fig = px.bar(total_resp, x="responsavel", y="valor", title="Gasto total (período filtrado)")
+        st.plotly_chart(fig, use_container_width=True)
 
-        with st.container():
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Total Gasto", f"R$ {total:,.2f}")
-            col2.metric("Média por Despesa", f"R$ {media:,.2f}")
-            col3.metric("Nº de Lançamentos", qtd)
-
-        st.subheader("Total por Categoria")
-        cat_df = df_filtrado.groupby("categoria")["valor"].sum().reset_index().sort_values("valor", ascending=False)
-
-        for i in range(0, len(cat_df), 3):
-            cols = st.columns(3)
-            for j in range(3):
-                if i + j < len(cat_df):
-                    row = cat_df.iloc[i + j]
-                    cols[j].metric(label=row["categoria"], value=f"R$ {row['valor']:,.2f}")
-
+        # b) tabela por categoria
+        st.subheader("Gasto por categoria")
+        tab_cat = (df_f.groupby("categoria", as_index=False)["valor"]
+                   .sum()
+                   .sort_values("valor", ascending=False))
+        tab_cat["valor"] = tab_cat["valor"].map(lambda x: f"R$ {x:,.2f}")
+        st.dataframe(tab_cat, use_container_width=True)
 
 # ======================================
-# 👥 COMPARATIVO POR RESPONSÁVEL
-elif pagina == "👥 Comparativo por Responsável":
-    st.title("👥 Comparativo por Responsável")
+# 2) PARCELAMENTOS
+elif pagina == "2) Parcelamentos":
+    st.title("2) Parcelamentos")
 
     if df_parcelado.empty:
-        st.warning("Nenhuma despesa cadastrada.")
+        st.warning("Sem dados de parcelamentos (ou base vazia).")
     else:
-        meses_fatura = df_parcelado['Ano-Mês Fatura'].drop_duplicates().sort_values(ascending=False)
-        mes_ref = st.selectbox("Selecione o Mês da Fatura", meses_fatura)
+        # aqui consideramos parcelas como a distribuição mensal (df_parcelado)
+        # a) card com total acumulado de todas as parcelas (dentro dos filtros globais)
+        total_parcelas = dfp_f["Valor Parcela"].sum() if not dfp_f.empty else 0.0
+        st.metric("Total acumulado de parcelas (filtros atuais)", f"R$ {total_parcelas:,.2f}")
 
-        df_comp = df_parcelado[
-            (df_parcelado['Ano-Mês Fatura'] == mes_ref) &
-            (df_parcelado['forma_pagamento'].isin(forma_pagamento_filtro))
-        ]
-
-
-
-        if df_comp.empty:
-            st.warning("Nenhuma despesa encontrada para os filtros selecionados.")
+        if dfp_f.empty:
+            st.warning("Sem parcelas para os filtros selecionados.")
         else:
-            df_group = df_comp.groupby(['categoria', 'responsavel'])['Valor Parcela'].sum().reset_index()
-            df_pivot = df_group.pivot(index='categoria', columns='responsavel', values='Valor Parcela').fillna(0)
+            # b) barras por mês até a última parcela
+            por_mes = (dfp_f.groupby("ParcelaMesRef", as_index=False)["Valor Parcela"]
+                       .sum()
+                       .sort_values("ParcelaMesRef"))
+            fig2 = px.bar(por_mes, x="ParcelaMesRef", y="Valor Parcela",
+                          title="Total a pagar por mês (parcelas) até a última parcela")
+            st.plotly_chart(fig2, use_container_width=True)
 
-            st.dataframe(df_pivot.style.format("R$ {:,.2f}"), use_container_width=True)
-
-            fig = px.bar(
-                df_group, x='categoria', y='Valor Parcela', color='responsavel',
-                barmode='group', title="Gastos por Categoria e Responsável"
-            )
-            st.plotly_chart(fig, use_container_width=True)
-
+            # c) tabela por categoria
+            st.subheader("Total de parcelas por categoria (filtros atuais)")
+            tab_cat_p = (dfp_f.groupby("categoria", as_index=False)["Valor Parcela"]
+                         .sum()
+                         .sort_values("Valor Parcela", ascending=False))
+            tab_cat_p["Valor Parcela"] = tab_cat_p["Valor Parcela"].map(lambda x: f"R$ {x:,.2f}")
+            st.dataframe(tab_cat_p, use_container_width=True)
 
 # ======================================
-# 💡 VISÃO INTELIGENTE POR MÊS
-elif pagina == "💡 Visão Inteligente por Mês":
-    st.title("💡 Visão Inteligente por Mês")
+# 3) PREVISÃO
+else:
+    st.title("3) Previsão (heurística: média dos últimos 3 meses)")
 
-    if df_parcelado.empty:
-        st.warning("Nenhuma despesa cadastrada.")
+    # salários (ajuste se quiser)
+    salarios = {"Rafael": 5600, "Nathalia": 4500}
+
+    if df.empty or "MesRef" not in df.columns:
+        st.warning("Sem histórico suficiente para prever.")
     else:
-        meses_fatura = df_parcelado['Ano-Mês Fatura'].drop_duplicates().sort_values(ascending=False)
-        mes_ref = st.selectbox("Selecione o Mês da Fatura", meses_fatura)
+        # últimos 3 meses disponíveis no histórico (base completa, mas respeitando responsável/forma global)
+        base_prev = df.copy()
+        base_prev = base_prev[base_prev["responsavel"].isin(f_resp)]
+        base_prev = base_prev[base_prev["forma_pagamento"].isin(f_forma)]
 
-        resp_viz = st.multiselect(
-            "Filtrar por Responsável", df_parcelado['responsavel'].dropna().unique(),
-            default=df_parcelado['responsavel'].dropna().unique()
-        )
-
-        # 🔧 Filtro completo com forma de pagamento
-        df_mes = df_parcelado[
-            (df_parcelado['responsavel'].isin(resp_viz)) &
-            (df_parcelado['forma_pagamento'].isin(forma_pagamento_filtro)) &
-            (df_parcelado['Ano-Mês Fatura'] == mes_ref)
-        ]
-
-
-        if df_mes.empty:
-            st.warning("Nenhum lançamento encontrado para o mês selecionado.")
+        meses = sorted(base_prev["MesRef"].dropna().unique())
+        if len(meses) < 1:
+            st.warning("Sem dados para os filtros selecionados.")
         else:
-            total_mes = df_mes['Valor Parcela'].sum()
+            ultimos = meses[-3:]  # pega até 3 meses
+            hist3 = base_prev[base_prev["MesRef"].isin(ultimos)]
 
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Total no Mês", f"R$ {total_mes:,.2f}")
-            col2.metric("Qtd. Lançamentos", len(df_mes))
-            col3.metric("Parcelamentos Ativos", df_mes['Numero Parcela'].nunique())
+            # a) previsão por categoria = média dos últimos 3 meses
+            prev_cat = (hist3.groupby(["MesRef", "categoria"], as_index=False)["valor"].sum())
+            media_cat = (prev_cat.groupby("categoria", as_index=False)["valor"].mean()
+                         .sort_values("valor", ascending=False))
+            media_cat = media_cat.rename(columns={"valor": "Previsão (média 3M)"})
 
-            fig_cat = px.bar(
-                df_mes.groupby('categoria')['Valor Parcela'].sum().reset_index(),
-                x='categoria', y='Valor Parcela', color='categoria', title='Total por Categoria'
-            )
-            st.plotly_chart(fig_cat, use_container_width=True)
+            # define próximo mês (YYYY-MM) a partir do último mês do histórico
+            ultimo_mes = pd.Period(meses[-1], freq="M")
+            prox_mes = (ultimo_mes + 1).strftime("%Y-%m")
 
-            df_mes['Data Parcela'] = pd.to_datetime(df_mes['Data Parcela']).dt.strftime('%d/%m/%Y')
-            df_mes['Valor Parcela'] = df_mes['Valor Parcela'].map('R$ {:,.2f}'.format)
-            st.dataframe(df_mes.sort_values("Data Parcela"), use_container_width=True)
-            
-# ======================================
-# 💳 RENDA COMPROMETIDA
-elif pagina == "💳 Renda Comprometida":
-    st.title("💳 Renda Comprometida no Cartão")
+            st.subheader(f"Previsão de gastos por categoria para {prox_mes}")
+            tabela_prev = media_cat.copy()
+            tabela_prev["Previsão (média 3M)"] = tabela_prev["Previsão (média 3M)"].map(lambda x: f"R$ {x:,.2f}")
+            st.dataframe(tabela_prev, use_container_width=True)
 
-    salarios = {'Rafael': 5600, 'Nathalia': 4500}
+            # gráfico da previsão
+            figp = px.bar(media_cat, x="categoria", y="Previsão (média 3M)", title=f"Previsão por categoria ({prox_mes})")
+            st.plotly_chart(figp, use_container_width=True)
 
-    if df_parcelado.empty:
-        st.warning("Nenhuma despesa cadastrada.")
-    else:
-        meses_fatura = df_parcelado['Ano-Mês Fatura'].drop_duplicates().sort_values(ascending=False)
-        mes_ref = st.selectbox("Selecione o Mês da Fatura", meses_fatura)
+            # b) cálculo dinheiro no próximo mês: salário - gastos previstos - parcelas do próximo mês
+            salario_total = sum(salarios.get(r, 0) for r in f_resp)
 
-        df_mes = df_parcelado[
-            (df_parcelado['Ano-Mês Fatura'] == mes_ref) &
-            (df_parcelado['forma_pagamento'].isin(forma_pagamento_filtro))
-        ]
+            # gastos previstos total (média 3M somada)
+            gastos_prev_total = media_cat["Previsão (média 3M)"].sum() if not media_cat.empty else 0.0
 
+            # parcelas do próximo mês (somente as parcelas agendadas nesse mês)
+            parcelas_prox = 0.0
+            if not df_parcelado.empty:
+                dfp_prev = df_parcelado.copy()
+                dfp_prev = dfp_prev[dfp_prev["responsavel"].isin(f_resp)]
+                dfp_prev = dfp_prev[dfp_prev["forma_pagamento"].isin(f_forma)]
+                parcelas_prox = dfp_prev[dfp_prev["ParcelaMesRef"] == prox_mes]["Valor Parcela"].sum()
 
-        col1, col2 = st.columns(2)
+            saldo_prev = salario_total - gastos_prev_total - parcelas_prox
 
-        for pessoa, col in zip(salarios.keys(), [col1, col2]):
-            col.subheader(f"👤 {pessoa}")
-            col.markdown(f"**💰 Renda Total:** R$ {salarios[pessoa]:,.2f}")
-
-            df_pessoa = df_mes[df_mes['responsavel'] == pessoa]
-            total_gasto = df_pessoa['Valor Parcela'].sum()
-
-            col.markdown(
-                f"<span style='color:red; font-size:18px;'>🔻 Total Comprometido: R$ {total_gasto:,.2f}</span>",
-                unsafe_allow_html=True
-            )
-
-            if df_pessoa.empty:
-                col.info("Sem despesas no cartão para este período.")
-            else:
-                resumo = df_pessoa.groupby('categoria')['Valor Parcela'].sum().reset_index()
-                resumo['% da Renda'] = resumo['Valor Parcela'] / salarios[pessoa]
-                resumo['Valor Parcela'] = resumo['Valor Parcela'].apply(lambda x: f"R$ {x:,.2f}")
-                resumo['% da Renda'] = resumo['% da Renda'].apply(lambda x: f"{x:.1%}")
-
-                col.dataframe(resumo.set_index('categoria'))
-
-
-
-# ======================================
-# 🗑️ DELETAR REGISTROS
-elif pagina == "🗑️ Deletar Registros":
-    st.title("🗑️ Deletar Registros de Despesas")
-
-    if df.empty:
-        st.warning("Nenhuma despesa cadastrada.")
-    else:
-        st.info("Selecione os registros que deseja deletar. Os registros mais recentes aparecem primeiro.")
-
-        df_deletar = df.sort_values(by="data_despesa", ascending=False).reset_index(drop=True)
-        df_deletar['Data'] = df_deletar['data_despesa'].dt.strftime('%d/%m/%Y')
-
-        df_mostrar = df_deletar[['id', 'Data', 'categoria', 'descricao', 'valor', 'forma_pagamento', 'parcelas', 'responsavel']]
-
-        df_mostrar = df_mostrar.rename(columns={
-            'id': 'ID',
-            'Data': 'Data',
-            'categoria': 'Categoria',
-            'descricao': 'Descrição',
-            'valor': 'Valor (R$)',
-            'forma_pagamento': 'Forma',
-            'parcelas': 'Parcelas',
-            'responsavel': 'Responsável'
-        })
-
-        st.dataframe(df_mostrar, use_container_width=True)
-
-        ids_para_deletar = st.multiselect(
-            "Selecione os IDs que deseja deletar:",
-            df_mostrar['ID'].tolist()
-        )
-
-        if ids_para_deletar:
-            st.warning(f"🚨 Você está prestes a deletar {len(ids_para_deletar)} registro(s). Esta ação não pode ser desfeita.")
-
-            if st.button("🚨 Confirmar Deleção"):
-                try:
-                    for id_deletar in ids_para_deletar:
-                        supabase.table('despesas').delete().eq('id', id_deletar).execute()
-
-                    st.success(f"✅ {len(ids_para_deletar)} registro(s) deletado(s) com sucesso!")
-                    st.session_state.pop('dados', None)  # 🔥 Limpa cache local
-                    st.rerun()
-
-                except Exception as e:
-                    st.error(f"❌ Erro ao deletar: {e}")
-        else:
-            st.info("Selecione um ou mais IDs na lista acima para habilitar a exclusão.")
-
-# ======================================
-# 🛒 SIMULAÇÃO DE COMPRA
-elif pagina == "🛒 Simulação de Compra":
-    st.title("🛒 Simulação de Compra por Produto")
-
-    # Tabela fixa de preços
-    dados_precos = [
-        {"Produto": "Banana", "Unidade": "kg", "Carrefour": 5.89, "Extra": 4.79, "Pão de Açúcar": 7.98},
-        {"Produto": "Iogurte Grego", "Unidade": "unidade", "Carrefour": 2.99, "Extra": 4.09, "Pão de Açúcar": 3.69},
-        {"Produto": "Leite em Pó Itambé", "Unidade": "unidade", "Carrefour": 15.99, "Extra": 17.99, "Pão de Açúcar": 18.29},
-        {"Produto": "Arroz Camil 1kg", "Unidade": "unidade", "Carrefour": 4.59, "Extra": 5.99, "Pão de Açúcar": 6.49},
-        {"Produto": "Papel Higiênico 12 rolos", "Unidade": "unidade", "Carrefour": 30.59, "Extra": 29.99, "Pão de Açúcar": 24.99},
-        {"Produto": "Azeite", "Unidade": "unidade", "Carrefour": 34.79, "Extra": 36.99, "Pão de Açúcar": 34.99},
-    ]
-    df_precos = pd.DataFrame(dados_precos)
-
-    # Produto selecionado
-    produto_selecionado = st.selectbox("Selecione o produto:", df_precos["Produto"].unique())
-
-    # Info do produto
-    produto_info = df_precos[df_precos["Produto"] == produto_selecionado].iloc[0]
-    unidade = produto_info["Unidade"]
-    qtde = st.number_input(f"Quantidade desejada ({unidade}):", 
-                           min_value=0.0, step=0.5 if unidade == "kg" else 1.0, 
-                           value=1.0, format="%.2f")
-
-    # Mostrar os preços nos três mercados
-    st.subheader(f"💵 Preços para **{produto_selecionado}**")
-
-    col1, col2, col3 = st.columns(3)
-    for col, mercado in zip([col1, col2, col3], ["Carrefour", "Extra", "Pão de Açúcar"]):
-        preco_unit = produto_info[mercado]
-        total = preco_unit * qtde
-        col.markdown(f"### 🛍️ {mercado}")
-        col.metric("Preço unitário", f"R$ {preco_unit:.2f}")
-        col.metric("Total estimado", f"R$ {total:.2f}")
-
-    # Mostrar tabela (opcional)
-    with st.expander("📋 Ver tabela completa de preços"):
-        st.dataframe(df_precos.set_index("Produto"))
-
-
-
-
-
-
+            st.subheader("Estimativa de saldo no próximo mês")
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Salário considerado", f"R$ {salario_total:,.2f}")
+            c2.metric("Gastos previstos (média 3M)", f"R$ {gastos_prev_total:,.2f}")
+            c3.metric("Parcelas do mês", f"R$ {parcelas_prox:,.2f}")
+            c4.metric("Saldo estimado", f"R$ {saldo_prev:,.2f}")
