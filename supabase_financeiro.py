@@ -1,6 +1,5 @@
 # ======================================
 # 🚀 IMPORTS E CONFIGURAÇÃO
-import os
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -12,28 +11,14 @@ warnings.filterwarnings("ignore")
 st.set_page_config(page_title="Controle Financeiro", layout="wide")
 
 # ======================================
-# 🔐 SUPABASE (Secrets no Streamlit Cloud)
-def get_supabase_credentials():
-    # 1) Streamlit Cloud Secrets
-    if "https://zhuqsxfmzubsxgbtfemq.supabase.co" in st.secrets and "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpodXFzeGZtenVic3hnYnRmZW1xIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDk5NTc4ODEsImV4cCI6MjA2NTUzMzg4MX0.6iUd7jGQRxN1ZLAvQv57b3QJpLkd4Mdzs43h9uDSfwc" in st.secrets:
-        return st.secrets["https://zhuqsxfmzubsxgbtfemq.supabase.co"], st.secrets["eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpodXFzeGZtenVic3hnYnRmZW1xIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDk5NTc4ODEsImV4cCI6MjA2NTUzMzg4MX0.6iUd7jGQRxN1ZLAvQv57b3QJpLkd4Mdzs43h9uDSfwc"]
+# 🔗 CONEXÃO COM SUPABASE (SEM SECRETS)
+SUPABASE_URL = "https://zhuqsxfmzubsxgbtfemq.supabase.co"
+SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpodXFzeGZtenVic3hnYnRmZW1xIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDk5NTc4ODEsImV4cCI6MjA2NTUzMzg4MX0.6iUd7jGQRxN1ZLAvQv57b3QJpLkd4Mdzs43h9uDSfwc"
 
-    # 2) Fallback local via env vars
-    url = os.getenv("https://zhuqsxfmzubsxgbtfemq.supabase.co")
-    key = os.getenv("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpodXFzeGZtenVic3hnYnRmZW1xIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDk5NTc4ODEsImV4cCI6MjA2NTUzMzg4MX0.6iUd7jGQRxN1ZLAvQv57b3QJpLkd4Mdzs43h9uDSfwc")
-    if url and key:
-        return url, key
-
-    raise RuntimeError(
-        "Credenciais do Supabase não encontradas. Configure SUPABASE_URL e SUPABASE_ANON_KEY em Streamlit Secrets "
-        "ou como variáveis de ambiente."
-    )
-
-SUPABASE_URL, SUPABASE_ANON_KEY = get_supabase_credentials()
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
 # ======================================
-# 📌 SCHEMA ESPERADO (evita KeyError quando base estiver vazia)
+# 📌 SCHEMA ESPERADO (evita KeyError com base vazia)
 COLUNAS_ESPERADAS = [
     "id", "data_despesa", "categoria", "descricao", "valor",
     "forma_pagamento", "parcelas", "responsavel", "semana"
@@ -46,13 +31,7 @@ FORMAS_FIXAS = ["Cartão de Crédito", "VR"]  # VR = Ticket/VR
 # 📥 CARREGAMENTO DOS DADOS
 def carregar_dados():
     if "dados" not in st.session_state:
-        try:
-            res = supabase.table("despesas").select("*").execute()
-        except Exception as e:
-            st.error("Falha ao consultar a tabela 'despesas' no Supabase.")
-            st.exception(e)
-            st.stop()
-
+        res = supabase.table("despesas").select("*").execute()
         df = pd.DataFrame(res.data)
 
         # ✅ garante colunas mesmo sem linhas
@@ -146,14 +125,10 @@ with st.expander("➕ Adicionar Nova Despesa"):
                     "responsavel": resp_in,
                     "semana": int(semana_in),
                 }
-                try:
-                    supabase.table("despesas").insert(nova).execute()
-                    st.success("💾 Despesa adicionada com sucesso!")
-                    st.session_state.pop("dados", None)
-                    st.rerun()
-                except Exception as e:
-                    st.error("❌ Erro ao adicionar despesa.")
-                    st.exception(e)
+                supabase.table("despesas").insert(nova).execute()
+                st.success("💾 Despesa adicionada com sucesso!")
+                st.session_state.pop("dados", None)
+                st.rerun()
 
 # ======================================
 # 🔥 FILTROS GLOBAIS
@@ -239,7 +214,6 @@ elif pagina == "2. Parcelamentos":
 # 3) PREVISÃO
 else:
     st.title("Previsão (média dos últimos 3 meses)")
-
     salarios = {"Rafael": 5600, "Nathalia": 4500}
 
     base_prev = df.copy()
