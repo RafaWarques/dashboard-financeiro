@@ -245,7 +245,10 @@ def mostrar_cadastro():
             st.session_state["form_categoria"] = "Outros"
 
         with st.expander("Revisar dados antes de salvar", expanded=bool(st.session_state.get("voz_transcricao"))):
-            with st.form("form_despesa", clear_on_submit=True):
+            # A limpeza é feita somente após o salvamento, em limpar_formulario_voz().
+            # Usar clear_on_submit junto com o session_state deixava o segundo áudio
+            # visualmente preenchido, mas podia enviar os valores padrão do formulário.
+            with st.form("form_despesa", clear_on_submit=False):
                 c1, c2 = st.columns(2)
                 data = c1.date_input("Data da despesa", datetime.today(), key="form_data")
                 semana = c2.number_input("Semana do ano", 1, 53, int(data.isocalendar()[1]), key="form_semana")
@@ -258,12 +261,15 @@ def mostrar_cadastro():
                 responsavel = c7.selectbox("Responsável", RESPONSAVEIS, index=0, key="form_responsavel")
                 salvar = st.form_submit_button("Salvar despesa", width="stretch")
                 if salvar:
-                    if not descricao.strip():
+                    descricao_final = (
+                        descricao or st.session_state.get("form_descricao", "")
+                    ).strip()
+                    if not descricao_final:
                         st.error("A descrição não pode estar vazia.")
                     else:
                         supabase.table("despesas").insert({
                             "data_despesa": data.strftime("%Y-%m-%d"), "categoria": categoria,
-                            "descricao": descricao.strip(), "valor": float(valor),
+                            "descricao": descricao_final, "valor": float(valor),
                             "forma_pagamento": "Não informado", "parcelas": int(parcelas),
                             "responsavel": responsavel, "semana": int(semana),
                         }).execute()
