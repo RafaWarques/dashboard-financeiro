@@ -20,7 +20,15 @@ CORES = {
     "Saúde": "#FB7185", "Transporte": "#FB923C", "Casa": "#60A5FA", "Outros": "#A8A29E",
 }
 RESPONSAVEIS = ["Rafael", "Nathalia"]
-COLUNAS = ["id", "data_despesa", "categoria", "descricao", "valor", "forma_pagamento", "parcelas", "responsavel", "semana"]
+COLUNAS = [
+    "id", "data_despesa", "categoria", "descricao", "valor",
+    "forma_pagamento", "parcelas", "responsavel", "semana",
+    "despesa_recorrente_id", "competencia",
+]
+MESES_PT = [
+    "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+    "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
+]
 
 st.markdown("""
 <style>
@@ -81,6 +89,14 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 def moeda(valor: float) -> str:
     texto = f"{float(valor):,.2f}"
     return f"R$ {texto.replace(',', 'X').replace('.', ',').replace('X', '.')}"
+
+
+def nome_mes(mes_ref: str) -> str:
+    try:
+        periodo = pd.Period(mes_ref, freq="M")
+        return f"{MESES_PT[periodo.month - 1]} {periodo.year}"
+    except Exception:
+        return str(mes_ref)
 
 
 def obter_openai_api_key():
@@ -154,7 +170,7 @@ def gerar_parcelas(base: pd.DataFrame) -> pd.DataFrame:
     if base.empty:
         return pd.DataFrame(columns=list(base.columns) + extras)
     parcelas = base.loc[base.index.repeat(base["parcelas"])].reset_index(drop=True)
-    grupo = ["data_despesa", "valor", "responsavel", "descricao", "categoria"]
+    grupo = ["id"] if "id" in parcelas.columns else ["data_despesa", "valor", "responsavel", "descricao", "categoria"]
     parcelas["Numero Parcela"] = parcelas.groupby(grupo, dropna=False).cumcount() + 1
     parcelas["Data Parcela"] = parcelas.apply(lambda r: r["data_despesa"] + pd.DateOffset(months=int(r["Numero Parcela"]) - 1) if pd.notna(r["data_despesa"]) else pd.NaT, axis=1)
     parcelas["Valor Parcela"] = parcelas["valor"] / parcelas["parcelas"]
@@ -193,41 +209,32 @@ st.markdown('''
 ''', unsafe_allow_html=True)
 pagina = st.radio(
     "Navegação",
-    ["🏠 Início", "🔁 Fixas e assinaturas", "📊 Análises", "💳 Parcelas", "🎯 Planejamento"],
+    ["🏠 Início", "📊 Visão mensal", "🧾 Despesas", "🔁 Fixas e assinaturas", "💳 Parcelas"],
     horizontal=True,
     label_visibility="collapsed",
 )
 
 st.sidebar.markdown("## Filtros")
-st.sidebar.caption("Afetam as análises e o planejamento.")
+st.sidebar.caption("O responsável selecionado afeta todas as páginas.")
 f_resp = st.sidebar.multiselect("Responsável", RESPONSAVEIS, default=RESPONSAVEIS)
-gran = st.sidebar.radio("Período por", ["Mês", "Semana", "Ano"], horizontal=True)
-if df.empty:
-    opcoes = []
-else:
-    coluna = {"Mês": "MesRef", "Semana": "SemanaRef", "Ano": "Ano"}[gran]
-    opcoes = sorted(df[coluna].dropna().unique(), reverse=True)
-periodo = st.sidebar.selectbox("Período", opcoes) if opcoes else None
 st.sidebar.caption("No celular, abra os filtros pelo ícone ›.")
 
 df_resp = df[df["responsavel"].isin(f_resp)].copy() if not df.empty else df.copy()
-df_f = df_resp.copy()
-if not df_f.empty and periodo is not None:
-    coluna = {"Mês": "MesRef", "Semana": "SemanaRef", "Ano": "Ano"}[gran]
-    df_f = df_f[df_f[coluna] == periodo]
 dfp_f = dfp[dfp["responsavel"].isin(f_resp)].copy() if not dfp.empty else dfp.copy()
 
 
 def mostrar_resumo():
-    if df_f.empty:
-        st.info("Seu resumo aparecerá aqui assim que houver despesas neste período.")
+    mes_atual = pd.Timestamp.today().to_period("M").strftime("%Y-%m")
+    base_mes = dfp_f[dfp_f["ParcelaMesRef"] == mes_atual].copy() if not dfp_f.empty else dfp_f.copy()
+    if base_mes.empty:
+        st.info("Seu resumo aparecerá aqui assim que houver despesas neste mês.")
         return
-    total = df_f["valor"].sum()
-    categoria = df_f.groupby("categoria")["valor"].sum().idxmax()
+    total = base_mes["Valor Parcela"].sum()
+    categoria = base_mes.groupby("categoria")["Valor Parcela"].sum().idxmax()
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Gasto no período", moeda(total))
-    col2.metric("Lançamentos", len(df_f))
-    col3.metric("Média por compra", moeda(total / len(df_f)))
+    col1.metric("Impacto neste mês", moeda(total))
+    col2.metric("Itens no mês", len(base_mes))
+    col3.metric("Média por item", moeda(total / len(base_mes)))
     col4.metric("Maior categoria", categoria)
 
 
@@ -363,7 +370,7 @@ def mostrar_cadastro():
 
 def mostrar_recorrencias():
     st.markdown("## Despesas fixas e assinaturas")
-    st.caption("Acompanhe as cobranças mensais e desative o que não faz mais parte do orçamento.")
+    st.caption("Veja exatamente o que se repete todos os meses e quanto isso representa no orçamento.")
 
     try:
         recorrencias = buscar_recorrencias()
@@ -380,39 +387,62 @@ def mostrar_recorrencias():
         st.caption("Use o cadastro da página Início e escolha o tipo de despesa antes de salvar.")
         return
 
-    recorrencias["valor"] = pd.to_numeric(recorrencias["valor"], errors="coerce").fillna(0)
+    recorrencias["valor"] = pd.to_numeric(recorrencias["valor"], errors="coerce").fillna(0.0)
     recorrencias["ativa"] = recorrencias["ativa"].fillna(False).astype(bool)
+    recorrencias["data_inicio"] = pd.to_datetime(recorrencias["data_inicio"], errors="coerce")
     ativas = recorrencias[recorrencias["ativa"]].copy()
     inativas = recorrencias[~recorrencias["ativa"]].copy()
 
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Custo mensal ativo", moeda(ativas["valor"].sum()))
-    c2.metric("Cobranças ativas", len(ativas))
-    c3.metric("Assinaturas", int((ativas["tipo"] == "assinatura").sum()) if not ativas.empty else 0)
+    assinaturas = ativas[ativas["tipo"] == "assinatura"].copy()
+    fixas = ativas[ativas["tipo"] == "fixa"].copy()
 
-    st.markdown("### Ativas")
-    if ativas.empty:
-        st.success("Não há cobranças recorrentes ativas.")
-    else:
-        for _, item in ativas.sort_values(["dia_cobranca", "descricao"]).iterrows():
-            with st.container(border=True):
-                info, valor_col, acao = st.columns([3, 1.2, 1.2])
-                tipo = "Assinatura" if item["tipo"] == "assinatura" else "Despesa fixa"
-                info.markdown(f"#### {item['descricao']}")
-                info.caption(
-                    f"{tipo} · {item['categoria']} · {item['responsavel']} · "
-                    f"cobrança todo dia {int(item['dia_cobranca'])}"
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Total recorrente mensal", moeda(ativas["valor"].sum()))
+    c2.metric("Assinaturas", moeda(assinaturas["valor"].sum()), f"{len(assinaturas)} ativas")
+    c3.metric("Despesas fixas", moeda(fixas["valor"].sum()), f"{len(fixas)} ativas")
+
+    def tabela_ativa(base: pd.DataFrame, nome_coluna: str):
+        if base.empty:
+            st.info(f"Nenhuma {nome_coluna.lower()} ativa.")
+            return
+        tabela = base.sort_values(["dia_cobranca", "descricao"]).copy()
+        tabela["Início"] = tabela["data_inicio"].dt.strftime("%d/%m/%Y").fillna("—")
+        tabela["Cobrança"] = tabela["dia_cobranca"].map(lambda dia: f"Dia {int(dia)}")
+        tabela["Valor mensal"] = tabela["valor"].map(moeda)
+        tabela = tabela.rename(
+            columns={"descricao": nome_coluna, "categoria": "Categoria", "responsavel": "Responsável"}
+        )
+        tabela = tabela[[nome_coluna, "Categoria", "Responsável", "Início", "Cobrança", "Valor mensal"]]
+        total = pd.DataFrame([{nome_coluna: "TOTAL", "Valor mensal": moeda(base["valor"].sum())}])
+        st.dataframe(pd.concat([tabela, total], ignore_index=True), width="stretch", hide_index=True)
+
+    aba_assinaturas, aba_fixas = st.tabs(["Assinaturas ativas", "Despesas fixas ativas"])
+    with aba_assinaturas:
+        tabela_ativa(assinaturas, "Assinatura")
+    with aba_fixas:
+        tabela_ativa(fixas, "Despesa fixa")
+
+    if not ativas.empty:
+        with st.expander("Desativar uma cobrança"):
+            opcoes = ativas.sort_values("descricao")["id"].tolist()
+            rotulos = {
+                item["id"]: f"{item['descricao']} · {moeda(item['valor'])} · dia {int(item['dia_cobranca'])}"
+                for _, item in ativas.iterrows()
+            }
+            recorrencia_id = st.selectbox(
+                "Selecione a despesa ou assinatura",
+                opcoes,
+                format_func=lambda identificador: rotulos[identificador],
+            )
+            if st.button("Desativar cobrança selecionada", type="primary", width="stretch"):
+                (
+                    supabase.table("despesas_recorrentes")
+                    .update({"ativa": False, "desativada_em": datetime.now().astimezone().isoformat()})
+                    .eq("id", recorrencia_id)
+                    .execute()
                 )
-                valor_col.metric("Por mês", moeda(item["valor"]))
-                if acao.button("Desativar", key=f"desativar_recorrencia_{item['id']}", width="stretch"):
-                    (
-                        supabase.table("despesas_recorrentes")
-                        .update({"ativa": False, "desativada_em": datetime.now().isoformat()})
-                        .eq("id", item["id"])
-                        .execute()
-                    )
-                    buscar_recorrencias.clear()
-                    st.rerun()
+                buscar_recorrencias.clear()
+                st.rerun()
 
     if not inativas.empty:
         with st.expander(f"Ver desativadas ({len(inativas)})"):
@@ -430,6 +460,193 @@ def mostrar_recorrencias():
             )
 
 
+def mostrar_despesas_comuns():
+    st.markdown("## Despesas comuns")
+    st.caption("Filtre os lançamentos e veja quanto cada categoria representa no período.")
+
+    comuns = df_resp[df_resp["despesa_recorrente_id"].isna()].copy() if not df_resp.empty else df_resp.copy()
+    if comuns.empty:
+        st.info("Ainda não há despesas comuns para os responsáveis selecionados.")
+        return
+
+    meses = sorted(comuns["MesRef"].dropna().unique(), reverse=True)
+    categorias = sorted(comuns["categoria"].dropna().unique())
+    filtro_mes, filtro_categoria = st.columns(2)
+    mes = filtro_mes.selectbox("Mês", meses + ["Todos"], format_func=lambda valor: "Todos os meses" if valor == "Todos" else nome_mes(valor))
+    categoria = filtro_categoria.selectbox("Categoria", ["Todas"] + categorias)
+
+    filtradas = comuns.copy()
+    if mes != "Todos":
+        filtradas = filtradas[filtradas["MesRef"] == mes]
+    if categoria != "Todas":
+        filtradas = filtradas[filtradas["categoria"] == categoria]
+
+    if filtradas.empty:
+        st.info("Não há despesas com essa combinação de filtros.")
+        return
+
+    total = filtradas["valor"].sum()
+    maior_categoria = filtradas.groupby("categoria")["valor"].sum().idxmax()
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Total filtrado", moeda(total))
+    c2.metric("Lançamentos", len(filtradas))
+    c3.metric("Média", moeda(total / len(filtradas)))
+    c4.metric("Maior categoria", maior_categoria)
+
+    por_categoria = (
+        filtradas.groupby("categoria", as_index=False)
+        .agg(Lançamentos=("valor", "size"), Total=("valor", "sum"))
+        .sort_values("Total", ascending=False)
+    )
+    por_categoria["Participação"] = (por_categoria["Total"] / total * 100).map(lambda valor: f"{valor:.1f}%")
+    por_categoria["Total"] = por_categoria["Total"].map(moeda)
+    por_categoria = por_categoria.rename(columns={"categoria": "Categoria"})
+
+    st.markdown("### Total por categoria")
+    st.dataframe(por_categoria[["Categoria", "Lançamentos", "Participação", "Total"]], width="stretch", hide_index=True)
+
+    st.markdown("### Lançamentos")
+    tabela = filtradas.sort_values(["data_despesa", "descricao"], ascending=[False, True]).copy()
+    tabela["Data"] = tabela["data_despesa"].dt.strftime("%d/%m/%Y")
+    tabela["Parcelamento"] = tabela["parcelas"].map(lambda qtd: "À vista" if int(qtd) == 1 else f"{int(qtd)}x")
+    tabela["Valor"] = tabela["valor"].map(moeda)
+    tabela = tabela.rename(columns={"descricao": "Descrição", "categoria": "Categoria", "responsavel": "Responsável"})
+    tabela = tabela[["Data", "Descrição", "Categoria", "Responsável", "Parcelamento", "Valor"]]
+    linha_total = pd.DataFrame([{"Descrição": "TOTAL", "Valor": moeda(total)}])
+    st.dataframe(pd.concat([tabela, linha_total], ignore_index=True), width="stretch", hide_index=True)
+    st.download_button(
+        "Baixar despesas filtradas (.csv)",
+        filtradas.to_csv(index=False).encode("utf-8-sig"),
+        "despesas_comuns.csv",
+        "text/csv",
+    )
+
+
+def classificar_origem(base: pd.DataFrame) -> pd.DataFrame:
+    resultado = base.copy()
+    resultado["Origem"] = "Despesa comum"
+    recorrente = resultado["despesa_recorrente_id"].notna()
+    resultado.loc[recorrente, "Origem"] = "Despesa fixa"
+    try:
+        regras = buscar_recorrencias()
+        ids_assinaturas = {
+            str(int(identificador))
+            for identificador in regras.loc[regras["tipo"] == "assinatura", "id"].dropna()
+        }
+        chaves = resultado["despesa_recorrente_id"].map(
+            lambda identificador: str(int(identificador)) if pd.notna(identificador) else ""
+        )
+        resultado.loc[chaves.isin(ids_assinaturas), "Origem"] = "Assinatura"
+    except Exception:
+        resultado.loc[recorrente, "Origem"] = "Recorrente"
+    return resultado
+
+
+def mostrar_visao_mensal():
+    st.markdown("## Visão mensal")
+    st.caption("O valor mensal distribui compras parceladas entre os meses e inclui as cobranças recorrentes já lançadas.")
+
+    if dfp_f.empty:
+        st.info("Ainda não há lançamentos suficientes para montar a visão mensal.")
+        return
+
+    base = classificar_origem(dfp_f)
+    meses = sorted(base["ParcelaMesRef"].dropna().unique(), reverse=True)
+    mes_atual = pd.Timestamp.today().to_period("M").strftime("%Y-%m")
+    indice_padrao = meses.index(mes_atual) if mes_atual in meses else 0
+    mes = st.selectbox("Mês analisado", meses, index=indice_padrao, format_func=nome_mes)
+    mensal = base[base["ParcelaMesRef"] == mes].copy()
+
+    total = mensal["Valor Parcela"].sum()
+    comuns = mensal.loc[mensal["Origem"] == "Despesa comum", "Valor Parcela"].sum()
+    recorrentes = total - comuns
+    mes_anterior = (pd.Period(mes, freq="M") - 1).strftime("%Y-%m")
+    total_anterior = base.loc[base["ParcelaMesRef"] == mes_anterior, "Valor Parcela"].sum()
+    variacao = ((total / total_anterior) - 1) * 100 if total_anterior else None
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Total do mês", moeda(total))
+    c2.metric("Despesas comuns", moeda(comuns))
+    c3.metric("Fixas e assinaturas", moeda(recorrentes))
+    c4.metric(
+        "Variação mensal",
+        f"{variacao:+.1f}%" if variacao is not None else "Sem comparação",
+        f"vs. {nome_mes(mes_anterior)}" if total_anterior else None,
+    )
+
+    if mensal.empty:
+        st.plotly_chart(grafico_vazio("Nenhum valor previsto para este mês"), width="stretch")
+        return
+
+    por_categoria = mensal.groupby("categoria", as_index=False)["Valor Parcela"].sum().sort_values("Valor Parcela", ascending=False)
+    por_origem = mensal.groupby("Origem", as_index=False)["Valor Parcela"].sum().sort_values("Valor Parcela", ascending=False)
+
+    grafico_col, composicao_col = st.columns([1.7, 1])
+    barras = px.bar(
+        por_categoria.sort_values("Valor Parcela"),
+        x="Valor Parcela",
+        y="categoria",
+        orientation="h",
+        color="categoria",
+        color_discrete_map=CORES,
+        title="Total por categoria",
+        labels={"Valor Parcela": "Valor", "categoria": "Categoria"},
+        text="Valor Parcela",
+    )
+    barras.update_traces(texttemplate="R$ %{text:,.2f}", textposition="outside")
+    barras.update_layout(showlegend=False)
+    grafico_col.plotly_chart(estilo_grafico(barras), width="stretch")
+
+    por_origem["Participação"] = (por_origem["Valor Parcela"] / total * 100).map(lambda valor: f"{valor:.1f}%")
+    por_origem["Total"] = por_origem["Valor Parcela"].map(moeda)
+    with composicao_col.container(border=True):
+        st.markdown("#### Composição do mês")
+        st.dataframe(por_origem[["Origem", "Participação", "Total"]], width="stretch", hide_index=True)
+
+    evolucao_base = base[base["ParcelaMesRef"] <= mes].copy()
+    ultimos_meses = sorted(evolucao_base["ParcelaMesRef"].dropna().unique())[-12:]
+    evolucao = (
+        evolucao_base[evolucao_base["ParcelaMesRef"].isin(ultimos_meses)]
+        .groupby(["ParcelaMesRef", "Origem"], as_index=False)["Valor Parcela"].sum()
+    )
+    fig_evolucao = px.bar(
+        evolucao,
+        x="ParcelaMesRef",
+        y="Valor Parcela",
+        color="Origem",
+        barmode="stack",
+        title="Evolução mensal por tipo de despesa",
+        labels={"ParcelaMesRef": "Mês", "Valor Parcela": "Total"},
+        color_discrete_map={"Despesa comum": "#DFFF3F", "Despesa fixa": "#60A5FA", "Assinatura": "#A78BFA", "Recorrente": "#60A5FA"},
+    )
+    st.plotly_chart(estilo_grafico(fig_evolucao), width="stretch")
+
+    maior_categoria = por_categoria.iloc[0]
+    maior_item = mensal.loc[mensal["Valor Parcela"].idxmax()]
+    participacao_recorrente = recorrentes / total * 100 if total else 0
+    st.markdown("### Leitura do mês")
+    st.markdown(
+        f'<div class="insight"><b>{maior_categoria["categoria"]}</b> é a maior categoria, com '
+        f'{moeda(maior_categoria["Valor Parcela"])}. O maior item mensal é '
+        f'<b>{maior_item["descricao"]}</b>, com {moeda(maior_item["Valor Parcela"])}. '
+        f'Fixas e assinaturas representam {participacao_recorrente:.1f}% do total.</div>',
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("### Itens que formam o total")
+    detalhe = mensal.sort_values(["Valor Parcela", "Data Parcela"], ascending=[False, False]).copy()
+    detalhe["Data"] = detalhe["Data Parcela"].dt.strftime("%d/%m/%Y")
+    detalhe["Parcela"] = detalhe.apply(
+        lambda item: "—" if int(item["parcelas"]) == 1 else f'{int(item["Numero Parcela"])}/{int(item["parcelas"])}',
+        axis=1,
+    )
+    detalhe["Valor no mês"] = detalhe["Valor Parcela"].map(moeda)
+    detalhe = detalhe.rename(columns={"descricao": "Descrição", "categoria": "Categoria", "responsavel": "Responsável"})
+    detalhe = detalhe[["Data", "Descrição", "Categoria", "Origem", "Responsável", "Parcela", "Valor no mês"]]
+    linha_total = pd.DataFrame([{"Descrição": "TOTAL", "Valor no mês": moeda(total)}])
+    st.dataframe(pd.concat([detalhe, linha_total], ignore_index=True), width="stretch", hide_index=True)
+
+
 if pagina == "🏠 Início":
     mostrar_cadastro()
     st.markdown("### Visão rápida")
@@ -443,57 +660,30 @@ if pagina == "🏠 Início":
             st.markdown("#### Últimos lançamentos")
             st.dataframe(recentes[["Data", "Descrição", "Categoria", "Responsável", "Valor"]], width="stretch", hide_index=True)
 
+elif pagina == "📊 Visão mensal":
+    mostrar_visao_mensal()
+
+elif pagina == "🧾 Despesas":
+    mostrar_despesas_comuns()
+
 elif pagina == "🔁 Fixas e assinaturas":
     mostrar_recorrencias()
 
-elif pagina == "📊 Análises":
-    st.markdown("## Painel de gastos")
-    st.caption(f"Leitura do período selecionado: {periodo or 'sem período disponível'}")
-    mostrar_resumo()
-    if df_f.empty:
-        st.plotly_chart(grafico_vazio(), width="stretch")
-    else:
-        por_cat = df_f.groupby("categoria", as_index=False)["valor"].sum().sort_values("valor", ascending=False)
-        esquerda, direita = st.columns([1.2, 1])
-        barras = px.bar(por_cat.sort_values("valor"), x="valor", y="categoria", orientation="h", color="categoria", color_discrete_map=CORES, title="Onde você mais gastou")
-        barras.update_layout(showlegend=False)
-        esquerda.plotly_chart(estilo_grafico(barras), width="stretch")
-        donut = px.pie(por_cat, names="categoria", values="valor", hole=.66, color="categoria", color_discrete_map=CORES, title="Participação por categoria")
-        donut.update_traces(textposition="outside", textinfo="percent+label")
-        direita.plotly_chart(estilo_grafico(donut), width="stretch")
-
-        mensal = df_resp.groupby("MesRef", as_index=False)["valor"].sum().sort_values("MesRef").tail(12)
-        linha = px.line(mensal, x="MesRef", y="valor", markers=True, title="Evolução dos últimos 12 meses", labels={"MesRef": "Mês", "valor": "Total"})
-        linha.update_traces(line_color="#DFFF3F", line_width=4, marker_size=8, fill="tozeroy", fillcolor="rgba(223,255,63,.10)")
-        st.plotly_chart(estilo_grafico(linha), width="stretch")
-
-        c1, c2 = st.columns(2)
-        maiores = df_f.nlargest(8, "valor")[["descricao", "categoria", "valor"]].copy()
-        maiores["valor"] = maiores["valor"].map(moeda)
-        maiores.columns = ["Descrição", "Categoria", "Valor"]
-        recorrentes = df_f.groupby("descricao", as_index=False).agg(Total=("valor", "sum"), Vezes=("valor", "size")).sort_values(["Vezes", "Total"], ascending=False).head(8)
-        recorrentes["Total"] = recorrentes["Total"].map(moeda)
-        recorrentes = recorrentes.rename(columns={"descricao": "Descrição"})
-        with c1.container(border=True):
-            st.markdown("#### Maiores compras")
-            st.dataframe(maiores, width="stretch", hide_index=True)
-        with c2.container(border=True):
-            st.markdown("#### Gastos mais recorrentes")
-            st.dataframe(recorrentes, width="stretch", hide_index=True)
-        st.download_button("Baixar dados filtrados (.csv)", df_f.to_csv(index=False).encode("utf-8-sig"), "despesas.csv", "text/csv")
-
-elif pagina == "💳 Parcelas":
+else:
     st.markdown("## Compromissos parcelados")
     st.caption("Antecipe o que já está comprometido nos próximos meses.")
     mes_atual = pd.Timestamp.today().to_period("M").strftime("%Y-%m")
-    futuras = dfp_f[dfp_f["ParcelaMesRef"] >= mes_atual].copy() if not dfp_f.empty else dfp_f.copy()
+    futuras = (
+        dfp_f[(dfp_f["parcelas"] > 1) & (dfp_f["ParcelaMesRef"] >= mes_atual)].copy()
+        if not dfp_f.empty else dfp_f.copy()
+    )
     if futuras.empty:
         st.success("Você não tem parcelas futuras registradas para estes responsáveis.")
         st.plotly_chart(grafico_vazio("Nenhuma parcela futura"), width="stretch")
     else:
         por_mes = futuras.groupby("ParcelaMesRef", as_index=False)["Valor Parcela"].sum().sort_values("ParcelaMesRef")
         c1, c2, c3 = st.columns(3)
-        c1.metric("Comprometido no próximo mês", moeda(por_mes.iloc[0]["Valor Parcela"]))
+        c1.metric(f"Vencimento em {nome_mes(por_mes.iloc[0]['ParcelaMesRef'])}", moeda(por_mes.iloc[0]["Valor Parcela"]))
         c2.metric("Total ainda parcelado", moeda(futuras["Valor Parcela"].sum()))
         c3.metric("Compras parceladas ativas", futuras["id"].nunique() if "id" in futuras else len(futuras))
         fig = px.bar(por_mes.head(12), x="ParcelaMesRef", y="Valor Parcela", title="Compromissos nos próximos 12 meses", color_discrete_sequence=["#8b5cf6"])
@@ -505,46 +695,4 @@ elif pagina == "💳 Parcelas":
         detalhe = detalhe.rename(columns={"descricao": "Descrição", "categoria": "Categoria"})
         st.dataframe(detalhe[["Descrição", "Categoria", "Parcela", "Vencimento", "Valor"]], width="stretch", hide_index=True)
 
-else:
-    st.markdown("## Planejamento e próximos passos")
-    st.caption("Sugestões baseadas no seu histórico — sem julgamentos e com ações possíveis.")
-    if df_resp.empty:
-        st.info("Registre algumas despesas para receber recomendações personalizadas.")
-    else:
-        meses = sorted(df_resp["MesRef"].dropna().unique())
-        hist = df_resp[df_resp["MesRef"].isin(meses[-3:])]
-        totais = hist.groupby("MesRef")["valor"].sum()
-        media = totais.mean() if not totais.empty else 0
-        media_cat = hist.groupby(["MesRef", "categoria"], as_index=False)["valor"].sum().groupby("categoria", as_index=False)["valor"].mean()
-        prox = (pd.Period(meses[-1], freq="M") + 1).strftime("%Y-%m")
-        parcelas_prox = dfp_f[dfp_f["ParcelaMesRef"] == prox]["Valor Parcela"].sum() if not dfp_f.empty else 0
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Média mensal (3 meses)", moeda(media))
-        c2.metric("Previsão base do próximo mês", moeda(media + parcelas_prox))
-        c3.metric("Parcelas no próximo mês", moeda(parcelas_prox))
-
-        with st.container(border=True):
-            st.markdown("### Seus insights")
-            if not media_cat.empty:
-                top = media_cat.loc[media_cat["valor"].idxmax()]
-                fatia = top["valor"] / media_cat["valor"].sum() * 100
-                st.markdown(f'<div class="insight"><b>Comece por {top["categoria"]}.</b> Ela representa cerca de {fatia:.0f}% da sua média recente. Uma redução de 10% liberaria aproximadamente {moeda(top["valor"] * .1)} por mês.</div>', unsafe_allow_html=True)
-            if len(totais) > 1 and totais.iloc[-2] > 0:
-                var = (totais.iloc[-1] / totais.iloc[-2] - 1) * 100
-                direcao = "aumentaram" if var > 0 else "diminuíram"
-                acao = "Revise as maiores compras antes de assumir novos compromissos." if var > 10 else "Continue acompanhando semanalmente para manter o controle."
-                st.markdown(f'<div class="insight"><b>Ritmo mensal:</b> seus gastos {direcao} {abs(var):.0f}% em relação ao mês anterior. {acao}</div>', unsafe_allow_html=True)
-            frequentes = hist.groupby("descricao").agg(total=("valor", "sum"), vezes=("valor", "size")).sort_values("vezes", ascending=False)
-            if not frequentes.empty and frequentes.iloc[0]["vezes"] >= 3:
-                st.markdown(f'<div class="insight"><b>Pequenos hábitos somam:</b> “{frequentes.index[0]}” apareceu {int(frequentes.iloc[0]["vezes"])} vezes e totalizou {moeda(frequentes.iloc[0]["total"])}. Experimente um limite semanal para esse gasto.</div>', unsafe_allow_html=True)
-
-        st.markdown("### Meta sugerida por categoria")
-        st.caption("Ponto de partida: 10% abaixo da média dos últimos três meses. Ajuste à sua realidade.")
-        metas = media_cat.sort_values("valor", ascending=False).copy()
-        metas["Média atual"] = metas["valor"].map(moeda)
-        metas["Meta sugerida"] = (metas["valor"] * .9).map(moeda)
-        metas["Economia potencial"] = (metas["valor"] * .1).map(moeda)
-        metas = metas.rename(columns={"categoria": "Categoria"})
-        st.dataframe(metas[["Categoria", "Média atual", "Meta sugerida", "Economia potencial"]], width="stretch", hide_index=True)
-
-st.caption("Estimativas para apoiar decisões pessoais; não constituem aconselhamento financeiro.")
+st.caption("Valores mensais consideram o parcelamento informado e as recorrências já lançadas pelo Supabase.")

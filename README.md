@@ -36,11 +36,12 @@ por mês, inclusive se a sincronização for executada mais de uma vez.
 
 ## Estrutura do aplicativo
 
-- **Início:** cadastro rápido por voz, resumo do período e últimos lançamentos.
-- **Fixas e assinaturas:** custo mensal ativo e desativação de cobranças recorrentes.
-- **Análises:** indicadores, categorias, evolução mensal, maiores compras e recorrências.
+- **Início:** cadastro rápido por voz, resumo do mês e últimos lançamentos.
+- **Visão mensal:** total mensal com parcelas e recorrências, categorias, composição e evolução.
+- **Despesas:** tabela de despesas comuns com filtros por mês e categoria e totais consolidados.
+- **Fixas e assinaturas:** tabelas de cobranças ativas, custo mensal e opção de desativação.
 - **Parcelas:** compromissos futuros e calendário das parcelas.
-- **Planejamento:** tendências, insights personalizados e metas sugeridas por categoria.
 
-Os filtros de responsável e período ficam na barra lateral. No celular, a navegação
-principal permanece no topo e os filtros podem ficar recolhidos.
+O filtro de responsável fica na barra lateral. Os filtros de mês e categoria aparecem
+nas páginas em que são necessários. No celular, a navegação principal permanece no
+topo e a barra lateral pode ficar recolhida.
