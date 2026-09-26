@@ -20,9 +20,24 @@ uma seção de cadastro. A barra lateral inicia recolhida para aproveitar melhor
 3. Informe `OPENAI_API_KEY` no arquivo criado (ele é ignorado pelo Git).
 4. Execute `streamlit run supabase_financeiro.py`.
 
+## Despesas fixas e assinaturas
+
+O cadastro da página **Início** permite escolher entre despesa comum, despesa fixa e
+assinatura. Para habilitar as cobranças recorrentes:
+
+1. Abra o SQL Editor do Supabase.
+2. Execute `supabase/migrations/20260926170000_despesas_recorrentes.sql`.
+3. Opcionalmente, execute `supabase/cron_recorrencias.sql` para processar as cobranças
+   todos os dias, mesmo sem abrir o app.
+
+Sem o agendamento opcional, o app sincroniza automaticamente as cobranças vencidas
+sempre que é aberto. O processo é idempotente: cada regra gera no máximo um lançamento
+por mês, inclusive se a sincronização for executada mais de uma vez.
+
 ## Estrutura do aplicativo
 
 - **Início:** cadastro rápido por voz, resumo do período e últimos lançamentos.
+- **Fixas e assinaturas:** custo mensal ativo e desativação de cobranças recorrentes.
 - **Análises:** indicadores, categorias, evolução mensal, maiores compras e recorrências.
 - **Parcelas:** compromissos futuros e calendário das parcelas.
 - **Planejamento:** tendências, insights personalizados e metas sugeridas por categoria.

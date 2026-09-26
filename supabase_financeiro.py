@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import warnings
-from datetime import datetime
+from datetime import date, datetime
 
 import pandas as pd
 import plotly.express as px
@@ -92,13 +92,44 @@ def obter_openai_api_key():
 
 
 def limpar_formulario_voz():
-    for chave in ("audio_despesa", "voz_transcricao", "voz_aviso", "form_categoria", "form_descricao", "form_valor", "form_parcelas", "form_responsavel", "form_data", "form_semana"):
+    for chave in ("audio_despesa", "voz_transcricao", "voz_aviso", "form_categoria", "form_descricao", "form_valor", "form_parcelas", "form_responsavel", "form_data", "form_semana", "tipo_lancamento"):
         st.session_state.pop(chave, None)
 
 
 @st.cache_data(ttl=120, show_spinner=False)
 def buscar_dados() -> pd.DataFrame:
     return pd.DataFrame(supabase.table("despesas").select("*").execute().data)
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def buscar_recorrencias() -> pd.DataFrame:
+    resposta = (
+        supabase.table("despesas_recorrentes")
+        .select("*")
+        .order("ativa", desc=True)
+        .order("dia_cobranca")
+        .execute()
+    )
+    return pd.DataFrame(resposta.data)
+
+
+def sincronizar_recorrencias() -> int:
+    """Materializa cobranças vencidas sem duplicá-las.
+
+    A função SQL também pode ser executada diariamente pelo Supabase Cron. A chamada
+    durante a abertura do app serve como garantia caso o agendamento não esteja ativo.
+    """
+    try:
+        resposta = supabase.rpc(
+            "sincronizar_despesas_recorrentes",
+            {"p_ate": date.today().isoformat()},
+        ).execute()
+        st.session_state.pop("erro_sincronizacao_recorrencias", None)
+        return int(resposta.data or 0)
+    except Exception as erro:
+        # Mantém o app antigo funcionando até a migração do Supabase ser aplicada.
+        st.session_state["erro_sincronizacao_recorrencias"] = str(erro)
+        return 0
 
 
 def carregar_dados() -> pd.DataFrame:
@@ -145,6 +176,9 @@ def grafico_vazio(texto="Ainda não há dados neste período"):
     return fig
 
 
+novas_recorrencias = sincronizar_recorrencias()
+if novas_recorrencias:
+    buscar_dados.clear()
 df = carregar_dados()
 dfp = gerar_parcelas(df)
 if st.session_state.pop("limpar_apos_salvar", False):
@@ -157,7 +191,12 @@ st.markdown('''
   <div class="app-subtitle">Registre em segundos, entenda seus hábitos e planeje o próximo passo.</div>
 </div>
 ''', unsafe_allow_html=True)
-pagina = st.radio("Navegação", ["🏠 Início", "📊 Análises", "💳 Parcelas", "🎯 Planejamento"], horizontal=True, label_visibility="collapsed")
+pagina = st.radio(
+    "Navegação",
+    ["🏠 Início", "🔁 Fixas e assinaturas", "📊 Análises", "💳 Parcelas", "🎯 Planejamento"],
+    horizontal=True,
+    label_visibility="collapsed",
+)
 
 st.sidebar.markdown("## Filtros")
 st.sidebar.caption("Afetam as análises e o planejamento.")
@@ -245,20 +284,39 @@ def mostrar_cadastro():
             st.session_state["form_categoria"] = "Outros"
 
         with st.expander("Revisar dados antes de salvar", expanded=bool(st.session_state.get("voz_transcricao"))):
+            tipo_lancamento = st.radio(
+                "Tipo de despesa",
+                ["Despesa comum", "Despesa fixa", "Assinatura"],
+                index=0,
+                horizontal=True,
+                key="tipo_lancamento",
+                help="Fixas e assinaturas serão lançadas automaticamente todo mês.",
+            )
             # A limpeza é feita somente após o salvamento, em limpar_formulario_voz().
             # Usar clear_on_submit junto com o session_state deixava o segundo áudio
             # visualmente preenchido, mas podia enviar os valores padrão do formulário.
             with st.form("form_despesa", clear_on_submit=False):
                 c1, c2 = st.columns(2)
-                data = c1.date_input("Data da despesa", datetime.today(), key="form_data")
-                semana = c2.number_input("Semana do ano", 1, 53, int(data.isocalendar()[1]), key="form_semana")
+                rotulo_data = "Primeira cobrança" if tipo_lancamento != "Despesa comum" else "Data da despesa"
+                data = c1.date_input(rotulo_data, datetime.today(), key="form_data")
+                if tipo_lancamento == "Despesa comum":
+                    semana = c2.number_input("Semana do ano", 1, 53, int(data.isocalendar()[1]), key="form_semana")
+                else:
+                    semana = int(data.isocalendar()[1])
+                    c2.info(f"A cobrança será lançada todo dia {data.day}.")
                 c3, c4 = st.columns(2)
                 categoria = c3.selectbox("Categoria", CATEGORIAS_FIXAS, key="form_categoria")
                 descricao = c4.text_input("Descrição", key="form_descricao", placeholder="Ex.: Almoço")
-                c5, c6, c7 = st.columns(3)
-                valor = c5.number_input("Valor (R$)", min_value=.01, step=.01, format="%.2f", key="form_valor")
-                parcelas = c6.number_input("Parcelas", min_value=1, step=1, value=1, key="form_parcelas")
-                responsavel = c7.selectbox("Responsável", RESPONSAVEIS, index=0, key="form_responsavel")
+                if tipo_lancamento == "Despesa comum":
+                    c5, c6, c7 = st.columns(3)
+                    valor = c5.number_input("Valor (R$)", min_value=.01, step=.01, format="%.2f", key="form_valor")
+                    parcelas = c6.number_input("Parcelas", min_value=1, step=1, value=1, key="form_parcelas")
+                    responsavel = c7.selectbox("Responsável", RESPONSAVEIS, index=0, key="form_responsavel")
+                else:
+                    c5, c7 = st.columns(2)
+                    valor = c5.number_input("Valor mensal (R$)", min_value=.01, step=.01, format="%.2f", key="form_valor")
+                    parcelas = 1
+                    responsavel = c7.selectbox("Responsável", RESPONSAVEIS, index=0, key="form_responsavel")
                 salvar = st.form_submit_button("Salvar despesa", width="stretch")
                 if salvar:
                     descricao_final = (
@@ -267,16 +325,109 @@ def mostrar_cadastro():
                     if not descricao_final:
                         st.error("A descrição não pode estar vazia.")
                     else:
-                        supabase.table("despesas").insert({
-                            "data_despesa": data.strftime("%Y-%m-%d"), "categoria": categoria,
-                            "descricao": descricao_final, "valor": float(valor),
-                            "forma_pagamento": "Não informado", "parcelas": int(parcelas),
-                            "responsavel": responsavel, "semana": int(semana),
-                        }).execute()
+                        if tipo_lancamento == "Despesa comum":
+                            supabase.table("despesas").insert({
+                                "data_despesa": data.strftime("%Y-%m-%d"), "categoria": categoria,
+                                "descricao": descricao_final, "valor": float(valor),
+                                "forma_pagamento": "Não informado", "parcelas": int(parcelas),
+                                "responsavel": responsavel, "semana": int(semana),
+                            }).execute()
+                            mensagem = "Despesa adicionada com sucesso!"
+                        else:
+                            try:
+                                supabase.table("despesas_recorrentes").insert({
+                                    "tipo": "fixa" if tipo_lancamento == "Despesa fixa" else "assinatura",
+                                    "data_inicio": data.strftime("%Y-%m-%d"),
+                                    "dia_cobranca": data.day,
+                                    "categoria": categoria,
+                                    "descricao": descricao_final,
+                                    "valor": float(valor),
+                                    "forma_pagamento": "Não informado",
+                                    "responsavel": responsavel,
+                                    "ativa": True,
+                                }).execute()
+                            except Exception:
+                                st.error(
+                                    "Não foi possível salvar a recorrência. Confirme se a migração "
+                                    "do Supabase indicada no README já foi executada."
+                                )
+                                return
+                            buscar_recorrencias.clear()
+                            sincronizar_recorrencias()
+                            mensagem = f"{tipo_lancamento} cadastrada com sucesso!"
                         buscar_dados.clear()
                         st.session_state["limpar_apos_salvar"] = True
-                        st.success("Despesa adicionada com sucesso!")
+                        st.success(mensagem)
                         st.rerun()
+
+
+def mostrar_recorrencias():
+    st.markdown("## Despesas fixas e assinaturas")
+    st.caption("Acompanhe as cobranças mensais e desative o que não faz mais parte do orçamento.")
+
+    try:
+        recorrencias = buscar_recorrencias()
+    except Exception:
+        st.error(
+            "A estrutura de recorrências ainda não existe no Supabase. "
+            "Execute a migração `supabase/migrations/20260926170000_despesas_recorrentes.sql` "
+            "no SQL Editor e recarregue o app."
+        )
+        return
+
+    if recorrencias.empty:
+        st.info("Você ainda não cadastrou despesas fixas ou assinaturas.")
+        st.caption("Use o cadastro da página Início e escolha o tipo de despesa antes de salvar.")
+        return
+
+    recorrencias["valor"] = pd.to_numeric(recorrencias["valor"], errors="coerce").fillna(0)
+    recorrencias["ativa"] = recorrencias["ativa"].fillna(False).astype(bool)
+    ativas = recorrencias[recorrencias["ativa"]].copy()
+    inativas = recorrencias[~recorrencias["ativa"]].copy()
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Custo mensal ativo", moeda(ativas["valor"].sum()))
+    c2.metric("Cobranças ativas", len(ativas))
+    c3.metric("Assinaturas", int((ativas["tipo"] == "assinatura").sum()) if not ativas.empty else 0)
+
+    st.markdown("### Ativas")
+    if ativas.empty:
+        st.success("Não há cobranças recorrentes ativas.")
+    else:
+        for _, item in ativas.sort_values(["dia_cobranca", "descricao"]).iterrows():
+            with st.container(border=True):
+                info, valor_col, acao = st.columns([3, 1.2, 1.2])
+                tipo = "Assinatura" if item["tipo"] == "assinatura" else "Despesa fixa"
+                info.markdown(f"#### {item['descricao']}")
+                info.caption(
+                    f"{tipo} · {item['categoria']} · {item['responsavel']} · "
+                    f"cobrança todo dia {int(item['dia_cobranca'])}"
+                )
+                valor_col.metric("Por mês", moeda(item["valor"]))
+                if acao.button("Desativar", key=f"desativar_recorrencia_{item['id']}", width="stretch"):
+                    (
+                        supabase.table("despesas_recorrentes")
+                        .update({"ativa": False, "desativada_em": datetime.now().isoformat()})
+                        .eq("id", item["id"])
+                        .execute()
+                    )
+                    buscar_recorrencias.clear()
+                    st.rerun()
+
+    if not inativas.empty:
+        with st.expander(f"Ver desativadas ({len(inativas)})"):
+            historico = inativas.copy()
+            historico["Tipo"] = historico["tipo"].map({"fixa": "Despesa fixa", "assinatura": "Assinatura"})
+            historico["Valor"] = historico["valor"].map(moeda)
+            historico["Cobrança"] = historico["dia_cobranca"].map(lambda dia: f"Dia {int(dia)}")
+            historico = historico.rename(
+                columns={"descricao": "Descrição", "categoria": "Categoria", "responsavel": "Responsável"}
+            )
+            st.dataframe(
+                historico[["Descrição", "Tipo", "Categoria", "Responsável", "Cobrança", "Valor"]],
+                width="stretch",
+                hide_index=True,
+            )
 
 
 if pagina == "🏠 Início":
@@ -291,6 +442,9 @@ if pagina == "🏠 Início":
         with st.container(border=True):
             st.markdown("#### Últimos lançamentos")
             st.dataframe(recentes[["Data", "Descrição", "Categoria", "Responsável", "Valor"]], width="stretch", hide_index=True)
+
+elif pagina == "🔁 Fixas e assinaturas":
+    mostrar_recorrencias()
 
 elif pagina == "📊 Análises":
     st.markdown("## Painel de gastos")
