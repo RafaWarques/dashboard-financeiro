@@ -11,6 +11,7 @@ import streamlit as st
 from supabase import Client, create_client
 
 from despesa_voz import CATEGORIAS_FIXAS, interpretar_despesa, interpretar_despesa_com_ia, transcrever_audio
+from wishlist_ui import mostrar_wishlist
 
 warnings.filterwarnings("ignore")
 st.set_page_config(page_title="Meu Financeiro", page_icon="💰", layout="wide", initial_sidebar_state="collapsed")
@@ -209,7 +210,7 @@ st.markdown('''
 ''', unsafe_allow_html=True)
 pagina = st.radio(
     "Navegação",
-    ["🏠 Início", "📊 Visão mensal", "🧾 Despesas", "🔁 Fixas e assinaturas", "💳 Parcelas"],
+    ["🏠 Início", "📊 Visão mensal", "🧾 Despesas", "🔁 Fixas e assinaturas", "💳 Parcelas", "♡ Lista de desejos"],
     horizontal=True,
     label_visibility="collapsed",
 )
@@ -668,6 +669,9 @@ elif pagina == "🧾 Despesas":
 
 elif pagina == "🔁 Fixas e assinaturas":
     mostrar_recorrencias()
+
+elif pagina == "♡ Lista de desejos":
+    mostrar_wishlist(SUPABASE_URL, f_resp)
 
 else:
     st.markdown("## Compromissos parcelados")

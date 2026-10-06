@@ -41,7 +41,26 @@ por mês, inclusive se a sincronização for executada mais de uma vez.
 - **Despesas:** tabela de despesas comuns com filtros por mês e categoria e totais consolidados.
 - **Fixas e assinaturas:** tabelas de cobranças ativas, custo mensal e opção de desativação.
 - **Parcelas:** compromissos futuros e calendário das parcelas.
+- **Lista de desejos:** foto pela câmera ou galeria, nome, valor, descrição e responsável,
+  com edição, exclusão e histórico de compras.
 
 O filtro de responsável fica na barra lateral. Os filtros de mês e categoria aparecem
 nas páginas em que são necessários. No celular, a navegação principal permanece no
 topo e a barra lateral pode ficar recolhida.
+
+## Wishlist / Lista de desejos
+
+Para habilitar a página **♡ Lista de desejos**:
+
+1. No SQL Editor do Supabase, execute
+   `supabase/migrations/20261006120000_wishlist.sql`.
+2. Adicione `SUPABASE_WISHLIST_KEY` aos secrets do Streamlit usando uma chave de
+   servidor (Secret API key ou `service_role`) do mesmo projeto.
+3. Atualize as dependências com `pip install -r requirements.txt` e reinicie o app.
+
+O script cria `wishlist_itens` e o bucket privado `wishlist-fotos`. Os desejos
+não afetam os totais de despesas. Marcar como comprado preserva o histórico;
+o lançamento financeiro deve ser cadastrado em Início.
+
+Veja o [guia completo de configuração, fotos e evolução financeira](docs/wishlist.md),
+incluindo o passo a passo do Supabase e a futura integração com metas e economia.
